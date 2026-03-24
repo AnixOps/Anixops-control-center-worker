@@ -21,8 +21,8 @@ export interface Env {
   // Workers AI
   AI: Ai
 
-  // Vectorize 向量数据库
-  VECTORIZE: VectorizeIndex
+  // Vectorize 向量数据库 (可选 - 需要先创建索引)
+  VECTORIZE?: VectorizeIndex
 
   // Durable Objects - 暂时禁用
   // WEBSOCKET_SERVER: DurableObjectNamespace

@@ -27,6 +27,9 @@ export async function insertVector(
   metadata: VectorMetadata
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    if (!env.VECTORIZE) {
+      return { success: false, error: 'Vectorize index not configured' }
+    }
     await env.VECTORIZE.upsert([
       {
         id,
@@ -49,6 +52,9 @@ export async function insertVectors(
   vectors: Array<{ id: string; values: number[]; metadata: VectorMetadata }>
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    if (!env.VECTORIZE) {
+      return { success: false, error: 'Vectorize index not configured' }
+    }
     await env.VECTORIZE.upsert(vectors)
     return { success: true }
   } catch (error) {
@@ -73,6 +79,9 @@ export async function searchVectors(
   error?: string
 }> {
   try {
+    if (!env.VECTORIZE) {
+      return { success: false, error: 'Vectorize index not configured' }
+    }
     const result = await env.VECTORIZE.query(queryEmbedding, {
       topK: options?.topK || 10,
       filter: options?.filter,
@@ -100,6 +109,9 @@ export async function deleteVector(
   id: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    if (!env.VECTORIZE) {
+      return { success: false, error: 'Vectorize index not configured' }
+    }
     await env.VECTORIZE.deleteByIds([id])
     return { success: true }
   } catch (error) {
@@ -119,6 +131,9 @@ export async function getVector(
   error?: string
 }> {
   try {
+    if (!env.VECTORIZE) {
+      return { success: false, error: 'Vectorize index not configured' }
+    }
     const result = await env.VECTORIZE.getByIds([id])
 
     if (result.length === 0) {

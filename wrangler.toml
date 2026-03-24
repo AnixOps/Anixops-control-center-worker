@@ -68,6 +68,8 @@ bucket_name = "anixops-files"
 [ai]
 binding = "AI"
 
-[[vectorize]]
-binding = "VECTORIZE"
-index_name = "anixops-embeddings"
+# Vectorize 绑定 - 需要先创建索引
+# 运行: npx wrangler vectorize create anixops-embeddings --dimensions=768 --metric=cosine
+# [[vectorize]]
+# binding = "VECTORIZE"
+# index_name = "anixops-embeddings"
