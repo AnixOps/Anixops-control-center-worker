@@ -1,0 +1,73 @@
+name = "anixops-control-center-workers"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[dev]
+port = 8787
+local_protocol = "http"
+
+[vars]
+ENVIRONMENT = "production"
+JWT_EXPIRE = "86400"
+
+[[routes]]
+pattern = "api.anixops.com"
+custom_domain = true
+
+[env.staging]
+name = "anixops-api-staging"
+vars = { ENVIRONMENT = "staging", JWT_EXPIRE = "86400" }
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "anixops-db-staging"
+database_id = "staging-db-id-placeholder"
+migrations_dir = "migrations"
+
+[[env.staging.kv_namespaces]]
+binding = "KV"
+id = "staging-kv-id-placeholder"
+
+[[env.staging.r2_buckets]]
+binding = "R2"
+bucket_name = "anixops-files-staging"
+
+[env.production]
+name = "anixops-api-prod"
+vars = { ENVIRONMENT = "production", JWT_EXPIRE = "86400" }
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "anixops-db"
+database_id = "1fd85576-c08d-44f3-a0fb-ec5fc845f1e5"
+migrations_dir = "migrations"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "35a39ccc4cea47e89aa8b1459f85e1cf"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "anixops-files"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "anixops-db"
+database_id = "1fd85576-c08d-44f3-a0fb-ec5fc845f1e5"
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "35a39ccc4cea47e89aa8b1459f85e1cf"
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "anixops-files"
+
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "anixops-embeddings"
