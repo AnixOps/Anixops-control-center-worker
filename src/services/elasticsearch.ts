@@ -122,9 +122,11 @@ export async function searchLogs(
       }
     }
 
-    // Sort by timestamp
+    // Sort by timestamp (handle undefined timestamps)
     logs.sort((a, b) => {
-      const cmp = a.timestamp.localeCompare(b.timestamp)
+      const tsA = a.timestamp || ''
+      const tsB = b.timestamp || ''
+      const cmp = tsA.localeCompare(tsB)
       return query.sort === 'desc' ? -cmp : cmp
     })
 
@@ -314,10 +316,10 @@ export async function exportLogs(
   if (format === 'csv') {
     const headers = ['timestamp', 'level', 'service', 'message', 'userId', 'traceId']
     const rows = result.hits.map(log => [
-      log.timestamp,
-      log.level,
-      log.service,
-      `"${log.message.replace(/"/g, '""')}"`,
+      log.timestamp || '',
+      log.level || '',
+      log.service || '',
+      `"${(log.message || '').replace(/"/g, '""')}"`,
       log.userId || '',
       log.traceId || '',
     ].join(','))
