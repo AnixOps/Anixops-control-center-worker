@@ -1,4 +1,4 @@
-name = "anixops-api-auth"
+name = "anixops-control-center-workers"
 main = "src/index-with-auth.ts"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
