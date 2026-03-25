@@ -779,5 +779,6 @@ beforeAll(() => {
     JWT_EXPIRE: '86400',
     API_KEY_SALT: 'test-salt',
     ENVIRONMENT: 'test',
+    DEVELOPER_MODE: 'false',
   }
 })

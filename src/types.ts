@@ -3,6 +3,7 @@
 export interface Env {
   // 环境变量
   ENVIRONMENT: 'development' | 'production'
+  DEVELOPER_MODE?: 'true' | 'false'
   JWT_SECRET: string
   JWT_EXPIRE: string
   API_KEY_SALT: string
@@ -60,6 +61,25 @@ export interface AuthPrincipal extends JWTPayload {
   auth_method: 'jwt' | 'api_key'
   token_id?: number
   token_name?: string
+}
+
+export type EndpointReadinessTier = 'verified' | 'seeded' | 'diagnostic' | 'manual' | 'inventory'
+export type EndpointExecutionMode = 'automated' | 'fixture-backed' | 'diagnostic' | 'manual' | 'inventory'
+export type EndpointAuthRequirement = 'public' | 'user' | 'operator' | 'admin'
+
+export interface EndpointManifestEntry {
+  id: string
+  family: string
+  subgroup?: string
+  name: string
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  path: string
+  auth: EndpointAuthRequirement
+  readiness: EndpointReadinessTier
+  execution_mode: EndpointExecutionMode
+  expected_status: number | number[]
+  fixture_keys?: string[]
+  manual_notes?: string
 }
 
 // 节点类型

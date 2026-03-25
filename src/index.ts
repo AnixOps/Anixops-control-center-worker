@@ -362,6 +362,12 @@ import {
   toggleLoadBalancerHandler,
 } from './handlers/loadbalancer'
 
+import {
+  developerModeStatusHandler,
+  developerDiagnosticsHandler,
+  developerFixturesCatalogHandler,
+} from './handlers/internal-dev'
+
 // Middleware
 import { authMiddleware, rbacMiddleware } from './middleware/auth'
 import { rateLimitMiddleware } from './middleware/rate-limit'
@@ -947,6 +953,11 @@ app.post('/api/v1/web3/challenge', web3ChallengeHandler)
 app.post('/api/v1/web3/verify', web3VerifyHandler)
 // 链上审计
 app.post('/api/v1/web3/audit', authMiddleware, web3AuditHandler)
+
+// ==================== 内部开发者模式 ====================
+app.get('/api/v1/internal/dev/status', authMiddleware, rbacMiddleware(['admin']), developerModeStatusHandler)
+app.get('/api/v1/internal/dev/diagnostics', authMiddleware, rbacMiddleware(['admin']), developerDiagnosticsHandler)
+app.get('/api/v1/internal/dev/fixtures', authMiddleware, rbacMiddleware(['admin']), developerFixturesCatalogHandler)
 
 // ==================== 错误处理 ====================
 

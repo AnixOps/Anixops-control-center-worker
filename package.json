@@ -10,6 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:devmode": "vitest run test/internal-dev.test.ts",
+    "test:visualize": "vitest run test/endpoint-visualizer.test.ts",
     "db:migrate": "wrangler d1 migrations apply anixops-db",
     "db:create": "wrangler d1 migrations create anixops-db",
     "typecheck": "tsc --noEmit"
