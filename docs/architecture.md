@@ -245,4 +245,4 @@ Use the following docs together:
 - `docs/incident-cloudflare-matrix.md` — binding/service mapping for incident capabilities
 - `docs/incident-operations.md` — operator workflow and verification guidance
 - `docs/incident-roadmap.md` — future work phases and platform gaps
-- `docs/client-baseline.md` — client-facing behavior baseline for future frontend or machine-client work
+- `docs/client-baseline.md` — client-facing behavior baseline for future frontend or machine client work

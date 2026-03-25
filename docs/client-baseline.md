@@ -1,6 +1,6 @@
 # Client API Baseline
 
-This document is the client-facing reference for future frontend or machine-client updates. It defines the stable expectations for authentication, request/response shapes, lifecycle flows, realtime updates, and retry behavior.
+This document is the client-facing reference for future frontend or machine client updates. It defines the stable expectations for authentication, request/response shapes, lifecycle flows, realtime updates, and retry behavior.
 
 ## Scope
 
