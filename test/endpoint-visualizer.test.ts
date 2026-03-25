@@ -2,29 +2,54 @@ import { writeFile } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 import { expect, test } from 'vitest'
 import app from '../src/index'
-import type { Env } from '../src/types'
+import type {
+  EndpointAuthRequirement,
+  EndpointExecutionMode,
+  EndpointManifestEntry,
+  EndpointReadinessTier,
+  Env,
+} from '../src/types'
 import { bootstrapPrincipals, createTestEnv } from './helpers/fixtures'
 
 const SENSITIVE_KEYS = new Set(['access_token', 'refresh_token', 'password_hash', 'api_key', 'secret'])
+const DEFAULT_FIXTURES = ['principals']
+const READINESS_LABELS: Record<EndpointReadinessTier, string> = {
+  verified: 'Verified',
+  seeded: 'Seeded',
+  diagnostic: 'Diagnostic',
+  manual: 'Manual',
+  inventory: 'Inventory',
+}
 
 interface RouteCase {
   group: string
+  subgroup?: string
   name: string
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   path: string
-  auth: 'public' | 'user' | 'operator' | 'admin'
+  auth: EndpointAuthRequirement
   expected: number | number[]
+  readiness?: EndpointReadinessTier
+  executionMode?: EndpointExecutionMode
+  fixtureKeys?: string[]
+  manualNotes?: string
   body?: (ctx: ScriptContext) => unknown
   headers?: (ctx: ScriptContext) => Record<string, string>
   skip?: string
 }
 
 interface ResultRow {
+  id: string
   group: string
+  subgroup?: string
   name: string
   method: string
   path: string
-  auth: string
+  auth: EndpointAuthRequirement
+  readiness: EndpointReadinessTier
+  executionMode: EndpointExecutionMode
+  fixtureKeys: string[]
+  manualNotes?: string
   expected: string
   status: number | 'skipped' | 'error'
   pass: boolean
@@ -49,83 +74,124 @@ function manualCase(
   auth: RouteCase['auth'],
   expected: number | number[] = 200,
   skip = INVENTORY_ONLY,
+  options: Pick<RouteCase, 'subgroup' | 'readiness' | 'executionMode' | 'fixtureKeys' | 'manualNotes'> = {},
 ): RouteCase {
-  return { group, name, method, path, auth, expected, skip }
+  return {
+    group,
+    name,
+    method,
+    path,
+    auth,
+    expected,
+    skip,
+    readiness: options.readiness,
+    executionMode: options.executionMode,
+    fixtureKeys: options.fixtureKeys,
+    manualNotes: options.manualNotes,
+    subgroup: options.subgroup,
+  }
 }
 
 function createCases(): RouteCase[] {
   return [
-    { group: 'platform', name: 'health', method: 'GET', path: '/health', auth: 'public', expected: 200 },
-    { group: 'platform', name: 'health detailed', method: 'GET', path: '/health/detailed', auth: 'public', expected: 200 },
-    { group: 'platform', name: 'readiness', method: 'GET', path: '/readiness', auth: 'public', expected: 200 },
-    { group: 'platform', name: 'liveness', method: 'GET', path: '/liveness', auth: 'public', expected: 200 },
-    { group: 'platform', name: 'metrics', method: 'GET', path: '/metrics', auth: 'public', expected: 200 },
+    { group: 'platform', subgroup: 'health', name: 'health', method: 'GET', path: '/health', auth: 'public', expected: 200, readiness: 'verified', executionMode: 'automated' },
+    { group: 'platform', subgroup: 'health', name: 'health detailed', method: 'GET', path: '/health/detailed', auth: 'public', expected: 200, readiness: 'verified', executionMode: 'automated' },
+    { group: 'platform', subgroup: 'health', name: 'readiness', method: 'GET', path: '/readiness', auth: 'public', expected: 200, readiness: 'verified', executionMode: 'automated' },
+    { group: 'platform', subgroup: 'health', name: 'liveness', method: 'GET', path: '/liveness', auth: 'public', expected: 200, readiness: 'verified', executionMode: 'automated' },
+    { group: 'platform', subgroup: 'health', name: 'metrics', method: 'GET', path: '/metrics', auth: 'public', expected: 200, readiness: 'verified', executionMode: 'automated' },
+    { group: 'platform', subgroup: 'developer-mode', name: 'developer mode status', method: 'GET', path: '/api/v1/internal/dev/status', auth: 'admin', expected: 200, readiness: 'diagnostic', executionMode: 'diagnostic', fixtureKeys: DEFAULT_FIXTURES, manualNotes: 'Confirms internal developer mode is enabled and gated to admin JWT sessions.' },
+    { group: 'platform', subgroup: 'developer-mode', name: 'developer diagnostics', method: 'GET', path: '/api/v1/internal/dev/diagnostics', auth: 'admin', expected: 200, readiness: 'diagnostic', executionMode: 'diagnostic', fixtureKeys: DEFAULT_FIXTURES },
+    { group: 'platform', subgroup: 'developer-mode', name: 'developer fixtures', method: 'GET', path: '/api/v1/internal/dev/fixtures', auth: 'admin', expected: 200, readiness: 'diagnostic', executionMode: 'diagnostic', fixtureKeys: DEFAULT_FIXTURES },
 
-    manualCase('auth', 'register', 'POST', '/api/v1/auth/register', 'public', 201, 'Rate-limited by bootstrap users; inventory only'),
+    manualCase('auth', 'register', 'POST', '/api/v1/auth/register', 'public', 201, 'Rate-limited by bootstrap users; inventory only', { subgroup: 'public', readiness: 'inventory', executionMode: 'inventory', manualNotes: 'Use dedicated auth flow tests when validating registration UX or rate-limit behavior.' }),
     {
       group: 'auth',
+      subgroup: 'public',
       name: 'login',
       method: 'POST',
       path: '/api/v1/auth/login',
       auth: 'public',
       expected: 200,
+      readiness: 'verified',
+      executionMode: 'automated',
+      fixtureKeys: DEFAULT_FIXTURES,
       body: () => ({ email: 'visualizer-admin@example.com', password: 'VisualizerPass123!' }),
     },
     {
       group: 'auth',
+      subgroup: 'public',
       name: 'refresh',
       method: 'POST',
       path: '/api/v1/auth/refresh',
       auth: 'public',
       expected: [200, 401],
+      readiness: 'diagnostic',
+      executionMode: 'automated',
+      manualNotes: 'Current smoke run uses an invalid refresh token to verify boundary behavior.',
       body: () => ({ refresh_token: 'invalid-token' }),
     },
-    manualCase('auth', 'logout', 'POST', '/api/v1/auth/logout', 'user'),
+    manualCase('auth', 'logout', 'POST', '/api/v1/auth/logout', 'user', 200, INVENTORY_ONLY, { subgroup: 'session', readiness: 'manual', executionMode: 'manual', fixtureKeys: DEFAULT_FIXTURES, manualNotes: 'Validate token invalidation and session teardown in targeted auth regression tests.' }),
 
     {
       group: 'identity',
+      subgroup: 'self-service',
       name: 'current user',
       method: 'GET',
       path: '/api/v1/users/me',
       auth: 'user',
       expected: 200,
+      readiness: 'verified',
+      executionMode: 'automated',
+      fixtureKeys: DEFAULT_FIXTURES,
     },
-    manualCase('identity', 'update current user', 'PUT', '/api/v1/users/me', 'user'),
+    manualCase('identity', 'update current user', 'PUT', '/api/v1/users/me', 'user', 200, INVENTORY_ONLY, { subgroup: 'self-service', readiness: 'manual', executionMode: 'manual', fixtureKeys: DEFAULT_FIXTURES, manualNotes: 'Manual QA should verify partial profile updates and field validation.' }),
     {
       group: 'identity',
+      subgroup: 'tokens',
       name: 'api tokens',
       method: 'GET',
       path: '/api/v1/users/me/tokens',
       auth: 'user',
       expected: 200,
+      readiness: 'verified',
+      executionMode: 'automated',
+      fixtureKeys: DEFAULT_FIXTURES,
     },
-    manualCase('identity', 'create api token', 'POST', '/api/v1/users/me/tokens', 'user', 201),
-    manualCase('identity', 'delete api token', 'DELETE', '/api/v1/users/me/tokens/:id', 'user'),
+    manualCase('identity', 'create api token', 'POST', '/api/v1/users/me/tokens', 'user', 201, INVENTORY_ONLY, { subgroup: 'tokens', readiness: 'manual', executionMode: 'manual', fixtureKeys: DEFAULT_FIXTURES }),
+    manualCase('identity', 'delete api token', 'DELETE', '/api/v1/users/me/tokens/:id', 'user', 200, INVENTORY_ONLY, { subgroup: 'tokens', readiness: 'inventory', executionMode: 'inventory' }),
     {
       group: 'identity',
+      subgroup: 'sessions',
       name: 'sessions',
       method: 'GET',
       path: '/api/v1/users/me/sessions',
       auth: 'user',
       expected: 200,
+      readiness: 'verified',
+      executionMode: 'automated',
+      fixtureKeys: DEFAULT_FIXTURES,
     },
-    manualCase('identity', 'delete other sessions', 'DELETE', '/api/v1/users/me/sessions/others', 'user'),
-    manualCase('identity', 'change password', 'PUT', '/api/v1/auth/password', 'user'),
+    manualCase('identity', 'delete other sessions', 'DELETE', '/api/v1/users/me/sessions/others', 'user', 200, INVENTORY_ONLY, { subgroup: 'sessions', readiness: 'manual', executionMode: 'manual', fixtureKeys: DEFAULT_FIXTURES }),
+    manualCase('identity', 'change password', 'PUT', '/api/v1/auth/password', 'user', 200, INVENTORY_ONLY, { subgroup: 'sessions', readiness: 'manual', executionMode: 'manual', fixtureKeys: DEFAULT_FIXTURES }),
 
     {
       group: 'identity-admin',
+      subgroup: 'administration',
       name: 'list users',
       method: 'GET',
       path: '/api/v1/users',
       auth: 'admin',
       expected: 200,
+      readiness: 'verified',
+      executionMode: 'automated',
+      fixtureKeys: DEFAULT_FIXTURES,
     },
-    manualCase('identity-admin', 'get user', 'GET', '/api/v1/users/:id', 'admin'),
-    manualCase('identity-admin', 'create user', 'POST', '/api/v1/users', 'admin', 201),
-    manualCase('identity-admin', 'update user', 'PUT', '/api/v1/users/:id', 'admin'),
-    manualCase('identity-admin', 'delete user', 'DELETE', '/api/v1/users/:id', 'admin'),
-    manualCase('identity-admin', 'lockout status', 'GET', '/api/v1/users/:id/lockout', 'admin'),
-    manualCase('identity-admin', 'unlock user', 'POST', '/api/v1/users/:id/unlock', 'admin'),
+    manualCase('identity-admin', 'get user', 'GET', '/api/v1/users/:id', 'admin', 200, INVENTORY_ONLY, { subgroup: 'administration', readiness: 'inventory', executionMode: 'inventory' }),
+    manualCase('identity-admin', 'create user', 'POST', '/api/v1/users', 'admin', 201, INVENTORY_ONLY, { subgroup: 'administration', readiness: 'manual', executionMode: 'manual' }),
+    manualCase('identity-admin', 'update user', 'PUT', '/api/v1/users/:id', 'admin', 200, INVENTORY_ONLY, { subgroup: 'administration', readiness: 'inventory', executionMode: 'inventory' }),
+    manualCase('identity-admin', 'delete user', 'DELETE', '/api/v1/users/:id', 'admin', 200, INVENTORY_ONLY, { subgroup: 'administration', readiness: 'inventory', executionMode: 'inventory' }),
+    manualCase('identity-admin', 'lockout status', 'GET', '/api/v1/users/:id/lockout', 'admin', 200, INVENTORY_ONLY, { subgroup: 'security', readiness: 'inventory', executionMode: 'inventory' }),
+    manualCase('identity-admin', 'unlock user', 'POST', '/api/v1/users/:id/unlock', 'admin', 200, INVENTORY_ONLY, { subgroup: 'security', readiness: 'inventory', executionMode: 'inventory' }),
 
     {
       group: 'nodes',
@@ -874,13 +940,21 @@ function stringifySummary(res: Response): Promise<string> {
 }
 
 async function runCase(route: RouteCase, ctx: ScriptContext): Promise<ResultRow> {
+  const manifest = normalizeManifestEntry(route)
+
   if (route.skip) {
     return {
-      group: route.group,
-      name: route.name,
-      method: route.method,
-      path: route.path,
-      auth: route.auth,
+      id: manifest.id,
+      group: manifest.family,
+      subgroup: manifest.subgroup,
+      name: manifest.name,
+      method: manifest.method,
+      path: manifest.path,
+      auth: manifest.auth,
+      readiness: manifest.readiness,
+      executionMode: manifest.execution_mode,
+      fixtureKeys: manifest.fixture_keys || [],
+      manualNotes: manifest.manual_notes,
       expected: Array.isArray(route.expected) ? route.expected.join(', ') : String(route.expected),
       status: 'skipped',
       pass: true,
@@ -910,11 +984,17 @@ async function runCase(route: RouteCase, ctx: ScriptContext): Promise<ResultRow>
       : res.status === route.expected
 
     return {
-      group: route.group,
-      name: route.name,
-      method: route.method,
-      path: route.path,
-      auth: route.auth,
+      id: manifest.id,
+      group: manifest.family,
+      subgroup: manifest.subgroup,
+      name: manifest.name,
+      method: manifest.method,
+      path: manifest.path,
+      auth: manifest.auth,
+      readiness: manifest.readiness,
+      executionMode: manifest.execution_mode,
+      fixtureKeys: manifest.fixture_keys || [],
+      manualNotes: manifest.manual_notes,
       expected: Array.isArray(route.expected) ? route.expected.join(', ') : String(route.expected),
       status: res.status,
       pass,
@@ -923,11 +1003,17 @@ async function runCase(route: RouteCase, ctx: ScriptContext): Promise<ResultRow>
     }
   } catch (err) {
     return {
-      group: route.group,
-      name: route.name,
-      method: route.method,
-      path: route.path,
-      auth: route.auth,
+      id: manifest.id,
+      group: manifest.family,
+      subgroup: manifest.subgroup,
+      name: manifest.name,
+      method: manifest.method,
+      path: manifest.path,
+      auth: manifest.auth,
+      readiness: manifest.readiness,
+      executionMode: manifest.execution_mode,
+      fixtureKeys: manifest.fixture_keys || [],
+      manualNotes: manifest.manual_notes,
       expected: Array.isArray(route.expected) ? route.expected.join(', ') : String(route.expected),
       status: 'error',
       pass: false,
@@ -946,11 +1032,42 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;')
 }
 
+function normalizeManifestEntry(route: RouteCase): EndpointManifestEntry {
+  const readiness = route.readiness || (route.skip ? 'inventory' : 'verified')
+  const executionMode = route.executionMode || (route.skip ? 'inventory' : 'automated')
+  const fixtureKeys = route.fixtureKeys || (route.auth === 'public' ? [] : DEFAULT_FIXTURES)
+
+  return {
+    id: `${route.method} ${route.path}`,
+    family: route.group,
+    subgroup: route.subgroup,
+    name: route.name,
+    method: route.method,
+    path: route.path,
+    auth: route.auth,
+    readiness,
+    execution_mode: executionMode,
+    expected_status: route.expected,
+    fixture_keys: fixtureKeys,
+    manual_notes: route.manualNotes || route.skip,
+  }
+}
+
 function renderHtmlReport(rows: ResultRow[]): string {
   const grouped = rows.reduce<Record<string, ResultRow[]>>((acc, row) => {
     (acc[row.group] ||= []).push(row)
     return acc
   }, {})
+
+  const readinessCounts = rows.reduce<Record<EndpointReadinessTier, number>>((acc, row) => {
+    acc[row.readiness] += 1
+    return acc
+  }, { verified: 0, seeded: 0, diagnostic: 0, manual: 0, inventory: 0 })
+
+  const authCounts = rows.reduce<Record<EndpointAuthRequirement, number>>((acc, row) => {
+    acc[row.auth] += 1
+    return acc
+  }, { public: 0, user: 0, operator: 0, admin: 0 })
 
   const summary = {
     total: rows.length,
@@ -959,77 +1076,183 @@ function renderHtmlReport(rows: ResultRow[]): string {
     skipped: rows.filter(row => row.status === 'skipped').length,
   }
 
-  const sections = Object.entries(grouped).map(([group, groupRows]) => `
-    <section class="card">
+  const tocItems = Object.entries(grouped).map(([group, groupRows]) => ({
+    group,
+    count: groupRows.length,
+    anchor: `family-${group.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+  }))
+
+  const sections = Object.entries(grouped).map(([group, groupRows]) => {
+    const subgrouped = groupRows.reduce<Record<string, ResultRow[]>>((acc, row) => {
+      const key = row.subgroup || 'general'
+      ;(acc[key] ||= []).push(row)
+      return acc
+    }, {})
+
+    const anchor = `family-${group.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+    const familySummary = `${groupRows.length} routes · ${groupRows.filter(row => row.pass).length} passing · ${groupRows.filter(row => row.status === 'skipped').length} skipped`
+
+    return `
+    <section class="card family-section" id="${escapeHtml(anchor)}" data-family="${escapeHtml(group.toLowerCase())}">
       <h2>${escapeHtml(group)}</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Method</th>
-            <th>Path</th>
-            <th>Auth</th>
-            <th>Expected</th>
-            <th>Status</th>
-            <th>Pass</th>
-            <th>ms</th>
-            <th>Summary</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${groupRows.map(row => `
-            <tr>
-              <td>${escapeHtml(row.name)}</td>
-              <td><code>${escapeHtml(row.method)}</code></td>
-              <td><code>${escapeHtml(row.path)}</code></td>
-              <td>${escapeHtml(row.auth)}</td>
-              <td>${escapeHtml(row.expected)}</td>
-              <td><span class="status ${row.status === 'error' ? 'fail' : row.status === 'skipped' ? 'skipped' : 'ok'}">${escapeHtml(String(row.status))}</span></td>
-              <td><span class="pass ${row.pass ? 'ok' : 'fail'}">${row.pass ? 'yes' : 'no'}</span></td>
-              <td>${row.ms}</td>
-              <td class="summary">${escapeHtml(row.summary)}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+      <p class="family-summary">${escapeHtml(familySummary)}</p>
+      ${Object.entries(subgrouped).map(([subgroup, subgroupRows]) => `
+        <details class="subgroup" ${subgroup === 'general' ? 'open' : ''} data-subgroup="${escapeHtml(subgroup.toLowerCase())}">
+          <summary>${escapeHtml(subgroup)} <span>${subgroupRows.length} routes</span></summary>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Method</th>
+                <th>Path</th>
+                <th>Auth</th>
+                <th>Readiness</th>
+                <th>Mode</th>
+                <th>Expected</th>
+                <th>Status</th>
+                <th>Pass</th>
+                <th>Fixtures</th>
+                <th>ms</th>
+                <th>Summary</th>
+                <th>Manual QA</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${subgroupRows.map(row => `
+                <tr class="route-row" data-search="${escapeHtml(`${row.group} ${row.subgroup || ''} ${row.name} ${row.path} ${row.auth} ${row.readiness} ${row.executionMode} ${row.fixtureKeys.join(' ')} ${row.manualNotes || ''}`.toLowerCase())}">
+                  <td>${escapeHtml(row.name)}</td>
+                  <td><code>${escapeHtml(row.method)}</code></td>
+                  <td><code>${escapeHtml(row.path)}</code></td>
+                  <td>${escapeHtml(row.auth)}</td>
+                  <td><span class="badge readiness-${row.readiness}">${escapeHtml(READINESS_LABELS[row.readiness])}</span></td>
+                  <td>${escapeHtml(row.executionMode)}</td>
+                  <td>${escapeHtml(row.expected)}</td>
+                  <td><span class="status ${row.status === 'error' ? 'fail' : row.status === 'skipped' ? 'skipped' : 'ok'}">${escapeHtml(String(row.status))}</span></td>
+                  <td><span class="pass ${row.pass ? 'ok' : 'fail'}">${row.pass ? 'yes' : 'no'}</span></td>
+                  <td>${escapeHtml(row.fixtureKeys.join(', ') || 'none')}</td>
+                  <td>${row.ms}</td>
+                  <td class="summary">${escapeHtml(row.summary)}</td>
+                  <td class="manual-notes">${escapeHtml(row.manualNotes || '')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </details>
+      `).join('')}
     </section>
-  `).join('')
+  `}).join('')
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Endpoint Visualizer Report</title>
+  <title>Developer Endpoint Dashboard</title>
   <style>
     :root { color-scheme: light dark; }
     body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 24px; background: #0f172a; color: #e2e8f0; }
     h1, h2, p { margin: 0 0 12px; }
-    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
-    .meta div, .card { background: #111827; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
-    .meta strong { display: block; font-size: 28px; margin-bottom: 4px; }
+    .layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 20px; align-items: start; }
+    .sidebar { position: sticky; top: 24px; background: #111827; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
+    .sidebar h2 { font-size: 16px; margin-bottom: 10px; }
+    .sidebar ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+    .sidebar a { color: #cbd5e1; text-decoration: none; display: flex; justify-content: space-between; gap: 8px; }
+    .sidebar a:hover { color: #fff; }
+    .search-panel { margin-bottom: 16px; }
+    .search-input { width: 100%; box-sizing: border-box; border-radius: 10px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; padding: 10px 12px; }
+    .search-hint { color: #94a3b8; font-size: 12px; margin-top: 8px; }
+    .content { min-width: 0; }
+    .meta, .meta-small { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .meta div, .meta-small div, .card { background: #111827; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
+    .meta strong, .meta-small strong { display: block; font-size: 28px; margin-bottom: 4px; }
+    .meta-small strong { font-size: 18px; }
     .card { margin-bottom: 20px; overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .family-summary { color: #94a3b8; }
+    .subgroup { margin-top: 12px; border: 1px solid #334155; border-radius: 10px; padding: 8px 12px; }
+    .subgroup summary { cursor: pointer; font-weight: 600; display: flex; justify-content: space-between; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 12px; }
     th, td { border-bottom: 1px solid #334155; padding: 10px 8px; text-align: left; vertical-align: top; }
     th { color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
     code { background: #0f172a; padding: 2px 6px; border-radius: 6px; }
-    .status, .pass { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
-    .ok { background: #064e3b; color: #bbf7d0; }
+    .status, .pass, .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    .ok, .readiness-verified { background: #064e3b; color: #bbf7d0; }
     .fail { background: #7f1d1d; color: #fecaca; }
-    .skipped { background: #78350f; color: #fde68a; }
-    .summary { max-width: 520px; word-break: break-word; }
+    .skipped, .readiness-inventory { background: #78350f; color: #fde68a; }
+    .readiness-seeded { background: #1d4ed8; color: #bfdbfe; }
+    .readiness-diagnostic { background: #5b21b6; color: #ddd6fe; }
+    .readiness-manual { background: #9a3412; color: #fed7aa; }
+    .summary, .manual-notes { max-width: 320px; word-break: break-word; }
+    .hidden { display: none !important; }
+    @media (max-width: 1100px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; }
+    }
   </style>
 </head>
 <body>
-  <h1>Endpoint Visualizer Report</h1>
-  <p>Generated at ${escapeHtml(new Date().toISOString())}</p>
-  <div class="meta">
-    <div><strong>${summary.total}</strong><span>Total</span></div>
-    <div><strong>${summary.passed}</strong><span>Passed</span></div>
-    <div><strong>${summary.failed}</strong><span>Failed</span></div>
-    <div><strong>${summary.skipped}</strong><span>Skipped</span></div>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="search-panel">
+        <h2>Search</h2>
+        <input id="route-search" class="search-input" type="search" placeholder="Search family, route, path, auth, readiness..." />
+        <div class="search-hint">Filter by route name, path, auth, readiness, subgroup, or fixture.</div>
+      </div>
+      <h2>Index</h2>
+      <ul>
+        ${tocItems.map(item => `<li><a href="#${escapeHtml(item.anchor)}"><span>${escapeHtml(item.group)}</span><span>${item.count}</span></a></li>`).join('')}
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>Developer Endpoint Dashboard</h1>
+      <p>Generated at ${escapeHtml(new Date().toISOString())}</p>
+      <div class="meta">
+        <div><strong>${summary.total}</strong><span>Total routes</span></div>
+        <div><strong>${summary.passed}</strong><span>Passing</span></div>
+        <div><strong>${summary.failed}</strong><span>Failing</span></div>
+        <div><strong>${summary.skipped}</strong><span>Skipped</span></div>
+      </div>
+      <div class="meta-small">
+        <div><strong>${readinessCounts.verified}</strong><span>Verified</span></div>
+        <div><strong>${readinessCounts.seeded}</strong><span>Seeded</span></div>
+        <div><strong>${readinessCounts.diagnostic}</strong><span>Diagnostic</span></div>
+        <div><strong>${readinessCounts.manual}</strong><span>Manual</span></div>
+        <div><strong>${readinessCounts.inventory}</strong><span>Inventory</span></div>
+        <div><strong>${authCounts.public}</strong><span>Public</span></div>
+        <div><strong>${authCounts.user}</strong><span>User</span></div>
+        <div><strong>${authCounts.operator}</strong><span>Operator</span></div>
+        <div><strong>${authCounts.admin}</strong><span>Admin</span></div>
+      </div>
+      ${sections}
+    </main>
   </div>
-  ${sections}
+  <script>
+    const input = document.getElementById('route-search');
+    const routeRows = Array.from(document.querySelectorAll('.route-row'));
+    const familySections = Array.from(document.querySelectorAll('.family-section'));
+    const subgroupDetails = Array.from(document.querySelectorAll('.subgroup'));
+
+    function applySearch() {
+      const term = input.value.trim().toLowerCase();
+
+      routeRows.forEach((row) => {
+        const haystack = row.getAttribute('data-search') || '';
+        row.classList.toggle('hidden', term.length > 0 && !haystack.includes(term));
+      });
+
+      subgroupDetails.forEach((detail) => {
+        const visibleRows = detail.querySelectorAll('.route-row:not(.hidden)').length;
+        detail.classList.toggle('hidden', visibleRows === 0);
+        if (term.length > 0 && visibleRows > 0) detail.open = true;
+      });
+
+      familySections.forEach((section) => {
+        const visibleRows = section.querySelectorAll('.route-row:not(.hidden)').length;
+        section.classList.toggle('hidden', visibleRows === 0);
+      });
+    }
+
+    input.addEventListener('input', applySearch);
+  </script>
 </body>
 </html>`
 }
@@ -1047,9 +1270,12 @@ async function printResults(rows: ResultRow[]) {
       method: row.method,
       path: row.path,
       auth: row.auth,
+      readiness: row.readiness,
+      mode: row.executionMode,
       expected: row.expected,
       status: row.status,
       pass: row.pass ? 'yes' : 'no',
+      fixtures: row.fixtureKeys.join(', ') || 'none',
       ms: row.ms,
       summary: row.summary,
     })))
@@ -1060,27 +1286,37 @@ async function printResults(rows: ResultRow[]) {
   const skipped = rows.filter(row => row.status === 'skipped').length
 
   console.log('\n## Summary')
-  console.table([{
-    total: rows.length,
-    passed,
-    failed,
-    skipped,
-  }])
+  console.table([{ total: rows.length, passed, failed, skipped }])
 
   if (failed > 0) {
     console.log('\nFailed routes:')
     for (const row of rows.filter(r => !r.pass)) {
-      console.log(`- ${row.method} ${row.path} (${row.auth}) => ${row.status} | expected ${row.expected} | ${row.summary}`)
+      console.log(`- ${row.method} ${row.path} (${row.auth}/${row.readiness}) => ${row.status} | expected ${row.expected} | ${row.summary}`)
     }
   }
 
   await writeFile('endpoint-visualizer-report.html', renderHtmlReport(rows), 'utf8')
+  await writeFile('endpoint-visualizer-report.json', JSON.stringify({
+    generated_at: new Date().toISOString(),
+    summary: {
+      total: rows.length,
+      passed,
+      failed,
+      skipped,
+    },
+    readiness: rows.reduce<Record<EndpointReadinessTier, number>>((acc, row) => {
+      acc[row.readiness] += 1
+      return acc
+    }, { verified: 0, seeded: 0, diagnostic: 0, manual: 0, inventory: 0 }),
+    routes: rows,
+  }, null, 2), 'utf8')
   console.log('\nHTML report written to endpoint-visualizer-report.html')
+  console.log('JSON report written to endpoint-visualizer-report.json')
 }
 
 
 async function main() {
-  const env = createTestEnv()
+  const env = createTestEnv({ DEVELOPER_MODE: 'true' })
   const principals = await bootstrapPrincipals(env)
 
   const ctx: ScriptContext = {
