@@ -40,7 +40,7 @@ const createIncidentSchema = z.object({
   summary: z.string().optional(),
   severity: z.enum(['low', 'medium', 'high', 'critical']).optional(),
   correlation_id: z.string().optional(),
-  action_type: z.enum(['scale_policy', 'restart_deployment']).optional(),
+  action_type: z.enum(['scale_policy', 'restart_deployment', 'scale_deployment']).optional(),
   action_ref: z.string().optional(),
   tags: z.array(z.string().max(50)).max(10).optional(),
   evidence: z.array(z.object({
@@ -53,7 +53,7 @@ const createIncidentSchema = z.object({
 const listIncidentQuerySchema = z.object({
   status: z.enum(['open', 'analyzed', 'approved', 'executing', 'resolved', 'failed']).optional(),
   severity: z.enum(['low', 'medium', 'high', 'critical']).optional(),
-  action_type: z.enum(['scale_policy', 'restart_deployment']).optional(),
+  action_type: z.enum(['scale_policy', 'restart_deployment', 'scale_deployment']).optional(),
   source: z.string().optional(),
   requested_via: z.enum(['jwt', 'api_key']).optional(),
   approved_by: z.coerce.number().int().optional(),
@@ -489,7 +489,7 @@ export async function searchIncidentsHandler(c: Context<{ Bindings: Env }>) {
 
   if (query.action_type) {
     searchParams.action_type = query.action_type.split(',').filter(s =>
-      ['scale_policy', 'restart_deployment'].includes(s)
+      ['scale_policy', 'restart_deployment', 'scale_deployment'].includes(s)
     ) as typeof searchParams.action_type
   }
 

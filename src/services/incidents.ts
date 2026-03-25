@@ -14,7 +14,7 @@ import type {
   IncidentSummary,
 } from '../types'
 import { evaluateScalingPolicy, executeScalingAction, getScalingPolicy, type ScalingDecision } from './autoscaling'
-import { listDeployments, listEvents, restartDeployment } from './kubernetes'
+import { listDeployments, listEvents, restartDeployment, scaleDeployment } from './kubernetes'
 import { generateText, AI_MODELS } from './ai'
 import { buildIncidentChannels, makeRealtimeEvent, publishRealtimeEvent } from './realtime'
 import { getActivePolicy, evaluatePolicy } from './governance'
@@ -709,6 +709,32 @@ async function executeRestartDeployment(env: Env, actionRef: string): Promise<{ 
   }
 }
 
+async function executeScaleDeployment(env: Env, actionRef: string): Promise<{ success: boolean; execution_id: string; result: Record<string, unknown> }> {
+  // Format: <namespace>/<deployment>/<replicas>
+  const parts = actionRef.split('/')
+  if (parts.length !== 3) {
+    throw new Error('scale_deployment action_ref must be <namespace>/<deployment>/<replicas>')
+  }
+
+  const [namespace, name, replicasStr] = parts
+  const replicas = parseInt(replicasStr, 10)
+  if (isNaN(replicas) || replicas < 0 || replicas > 1000) {
+    throw new Error('Replicas must be a valid number between 0 and 1000')
+  }
+
+  const success = await scaleDeployment(env, namespace, name, replicas)
+  return {
+    success,
+    execution_id: crypto.randomUUID(),
+    result: {
+      namespace,
+      deployment: name,
+      replicas,
+      scaled: success,
+    },
+  }
+}
+
 export async function executeIncident(env: Env, incident: IncidentRecord): Promise<IncidentRecord> {
   if (incident.status !== 'approved') {
     throw new Error('Incident must be approved before execution')
@@ -783,6 +809,27 @@ export async function executeIncident(env: Env, incident: IncidentRecord): Promi
         success: result.success,
         operation: 'restart_deployment',
         message: result.success ? 'Deployment restarted' : 'Deployment restart failed',
+        target: {
+          kind: 'deployment',
+          id: actionRef,
+          name: (result.result.deployment as string | undefined),
+          namespace: (result.result.namespace as string | undefined),
+        },
+        details: result.result,
+      },
+      updated_at: nowIso(),
+    }
+  } else if (incident.action_type === 'scale_deployment') {
+    const result = await executeScaleDeployment(env, actionRef)
+    updated = {
+      ...executing,
+      status: result.success ? 'resolved' : 'failed',
+      execution_id: result.execution_id,
+      execution_result: {
+        backend: 'kubernetes',
+        success: result.success,
+        operation: 'scale_deployment',
+        message: result.success ? `Deployment scaled to ${result.result.replicas} replicas` : 'Deployment scaling failed',
         target: {
           kind: 'deployment',
           id: actionRef,

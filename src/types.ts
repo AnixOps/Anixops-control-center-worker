@@ -199,7 +199,7 @@ export interface AuditLog {
 // Incident workflow types
 export type IncidentSeverity = 'low' | 'medium' | 'high' | 'critical'
 export type IncidentStatus = 'open' | 'analyzed' | 'approved' | 'executing' | 'resolved' | 'failed'
-export type IncidentActionType = 'scale_policy' | 'restart_deployment'
+export type IncidentActionType = 'scale_policy' | 'restart_deployment' | 'scale_deployment'
 
 export interface IncidentEvidence {
   type: 'log' | 'metric' | 'task' | 'node' | 'alert' | 'service' | 'manual'
