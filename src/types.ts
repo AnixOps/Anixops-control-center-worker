@@ -217,10 +217,11 @@ export interface IncidentRecommendation {
 }
 
 export interface IncidentLink {
-  kind: 'task' | 'node' | 'scaling_policy' | 'deployment'
+  kind: 'task' | 'node' | 'scaling_policy' | 'deployment' | 'runbook' | 'alert' | 'playbook'
   id: string
   name?: string
   href?: string
+  relationship?: 'caused_by' | 'related_to' | 'resolves' | 'investigates'
 }
 
 export interface IncidentExecutionResult {
@@ -325,6 +326,9 @@ export type IncidentTimelineEventType =
   | 'evidence_added'
   | 'comment'
   | 'severity_upgraded'
+  | 'link_added'
+  | 'runbook_executed'
+  | 'status_changed'
 
 export interface IncidentTimelineEvent {
   id: string

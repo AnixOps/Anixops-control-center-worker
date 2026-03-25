@@ -57,6 +57,12 @@ import {
   createNotificationRuleHandler,
   deleteNotificationRuleHandler,
   toggleNotificationRuleHandler,
+  addIncidentLinkHandler,
+  removeIncidentLinkHandler,
+  addIncidentEvidenceHandler,
+  getIncidentActivityLogHandler,
+  getRunbookSuggestionsHandler,
+  executeRunbookHandler,
 } from './handlers/incidents'
 import {
   listPoliciesHandler,
@@ -366,6 +372,14 @@ app.delete('/api/v1/incidents/:id/assign', authMiddleware, rbacMiddleware(['admi
 app.post('/api/v1/incidents/:id/analyze', authMiddleware, rbacMiddleware(['admin', 'operator']), analyzeIncidentHandler)
 app.post('/api/v1/incidents/:id/approve', authMiddleware, rbacMiddleware(['admin', 'operator']), approveIncidentHandler)
 app.post('/api/v1/incidents/:id/execute', authMiddleware, rbacMiddleware(['admin', 'operator']), executeIncidentHandler)
+
+// Incident links and evidence
+app.post('/api/v1/incidents/:id/links', authMiddleware, rbacMiddleware(['admin', 'operator']), addIncidentLinkHandler)
+app.delete('/api/v1/incidents/:id/links/:linkKind/:linkId', authMiddleware, rbacMiddleware(['admin', 'operator']), removeIncidentLinkHandler)
+app.post('/api/v1/incidents/:id/evidence', authMiddleware, rbacMiddleware(['admin', 'operator']), addIncidentEvidenceHandler)
+app.get('/api/v1/incidents/:id/activity', authMiddleware, getIncidentActivityLogHandler)
+app.get('/api/v1/incidents/:id/runbooks', authMiddleware, rbacMiddleware(['admin', 'operator']), getRunbookSuggestionsHandler)
+app.post('/api/v1/incidents/:id/runbooks/execute', authMiddleware, rbacMiddleware(['admin', 'operator']), executeRunbookHandler)
 
 // Incident tags
 app.get('/api/v1/incidents/tags', authMiddleware, listTagsHandler)

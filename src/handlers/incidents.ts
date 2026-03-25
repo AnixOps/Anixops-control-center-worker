@@ -1,9 +1,11 @@
 import type { Context } from 'hono'
 import { z } from 'zod'
-import type { Env } from '../types'
+import type { Env, IncidentEvidence, IncidentLink } from '../types'
 import { logAudit } from '../utils/audit'
 import {
   addIncidentComment,
+  addIncidentEvidence,
+  addIncidentLink,
   addIncidentTags,
   acknowledgeIncident,
   analyzeIncident,
@@ -24,8 +26,10 @@ import {
   deleteSuppressionRule,
   escalateIncident,
   executeIncident,
+  executeRunbookForIncident,
   generateIncidentReport,
   getIncident,
+  getIncidentActivityLog,
   getIncidentComment,
   getIncidentSlaStatus,
   getIncidentStatistics,
@@ -36,9 +40,11 @@ import {
   listNotificationRules,
   listSuppressionRules,
   mergeIncidents,
+  removeIncidentLink,
   removeIncidentTags,
   searchIncidents,
   setIncidentTags,
+  suggestRunbooks,
   toggleNotificationRule,
   toggleSuppressionRule,
   toIncidentDetail,
@@ -922,4 +928,141 @@ export async function getIncidentReportHandler(c: Context<{ Bindings: Env }>) {
 
   const report = await generateIncidentReport(c.env, query.start_date, query.end_date)
   return c.json({ success: true, data: report })
+}
+
+// Link Management
+const linkSchema = z.object({
+  kind: z.enum(['task', 'node', 'scaling_policy', 'deployment', 'runbook', 'alert', 'playbook']),
+  id: z.string().min(1),
+  name: z.string().optional(),
+  href: z.string().optional(),
+  relationship: z.enum(['caused_by', 'related_to', 'resolves', 'investigates']).optional(),
+})
+
+export async function addIncidentLinkHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  try {
+    const body = linkSchema.parse(await c.req.json())
+    const updated = await addIncidentLink(c.env, incident, body as IncidentLink)
+
+    await logAudit(c, principal.sub, 'add_incident_link', 'incident', {
+      incident_id: incident.id,
+      link_kind: body.kind,
+      link_id: body.id,
+    })
+
+    return c.json({ success: true, data: toIncidentDetail(updated) })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function removeIncidentLinkHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  const linkKind = c.req.param('linkKind') as IncidentLink['kind']
+  const linkId = c.req.param('linkId') as string
+
+  const updated = await removeIncidentLink(c.env, incident, linkKind, linkId)
+
+  await logAudit(c, principal.sub, 'remove_incident_link', 'incident', {
+    incident_id: incident.id,
+    link_kind: linkKind,
+    link_id: linkId,
+  })
+
+  return c.json({ success: true, data: toIncidentDetail(updated) })
+}
+
+// Evidence Management
+const evidenceSchema = z.object({
+  type: z.enum(['log', 'metric', 'task', 'node', 'alert', 'service', 'manual']),
+  source: z.string().min(1),
+  content: z.string().min(1),
+})
+
+export async function addIncidentEvidenceHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  try {
+    const body = evidenceSchema.parse(await c.req.json())
+    const updated = await addIncidentEvidence(c.env, incident, body as IncidentEvidence)
+
+    await logAudit(c, principal.sub, 'add_incident_evidence', 'incident', {
+      incident_id: incident.id,
+      evidence_type: body.type,
+      evidence_source: body.source,
+    })
+
+    return c.json({ success: true, data: toIncidentDetail(updated) })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+// Activity Log
+export async function getIncidentActivityLogHandler(c: Context<{ Bindings: Env }>) {
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  const logs = await getIncidentActivityLog(c.env, incident.id)
+  return c.json({ success: true, data: logs })
+}
+
+// Runbook Suggestions
+export async function getRunbookSuggestionsHandler(c: Context<{ Bindings: Env }>) {
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  const suggestions = await suggestRunbooks(c.env, incident)
+  return c.json({ success: true, data: suggestions })
+}
+
+export async function executeRunbookHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  try {
+    const body = z.object({ playbook_id: z.number().int().positive() }).parse(await c.req.json())
+    const result = await executeRunbookForIncident(c.env, incident, body.playbook_id, principal)
+
+    await logAudit(c, principal.sub, 'execute_runbook_for_incident', 'incident', {
+      incident_id: incident.id,
+      playbook_id: body.playbook_id,
+      task_id: result.task_id,
+    })
+
+    return c.json({ success: true, data: result })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
 }

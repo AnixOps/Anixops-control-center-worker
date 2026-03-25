@@ -7,6 +7,7 @@ import type {
   IncidentDetail,
   IncidentEvidence,
   IncidentExecutionResult,
+  IncidentLink,
   IncidentRecord,
   IncidentRecommendation,
   IncidentSeverity,
@@ -2540,5 +2541,223 @@ export async function generateIncidentReport(
     top_tags: topTags,
     top_sources: bySource.slice(0, 5),
     mttr_by_severity: mttrBySeverity,
+  }
+}
+
+// ==================== Link Management ====================
+
+export async function addIncidentLink(
+  env: Env,
+  incident: IncidentRecord,
+  link: IncidentLink
+): Promise<IncidentRecord> {
+  const now = nowIso()
+  const existingLinks = incident.links || []
+
+  // Check if link already exists
+  const exists = existingLinks.some(l => l.kind === link.kind && l.id === link.id)
+  if (exists) {
+    return incident
+  }
+
+  const updated: IncidentRecord = {
+    ...incident,
+    links: [...existingLinks, link],
+    updated_at: now,
+  }
+
+  await storeIncident(env, updated)
+  publishIncidentEvent(env, updated, 'incident.link_added')
+
+  return updated
+}
+
+export async function removeIncidentLink(
+  env: Env,
+  incident: IncidentRecord,
+  linkKind: IncidentLink['kind'],
+  linkId: string
+): Promise<IncidentRecord> {
+  const now = nowIso()
+  const existingLinks = incident.links || []
+
+  const updated: IncidentRecord = {
+    ...incident,
+    links: existingLinks.filter(l => !(l.kind === linkKind && l.id === linkId)),
+    updated_at: now,
+  }
+
+  await storeIncident(env, updated)
+
+  return updated
+}
+
+// ==================== Evidence Management ====================
+
+export async function addIncidentEvidence(
+  env: Env,
+  incident: IncidentRecord,
+  evidence: IncidentEvidence
+): Promise<IncidentRecord> {
+  const now = nowIso()
+
+  const updated: IncidentRecord = {
+    ...incident,
+    evidence: [...incident.evidence, evidence],
+    updated_at: now,
+  }
+
+  await storeIncident(env, updated)
+  publishIncidentEvent(env, updated, 'incident.evidence_added')
+
+  return updated
+}
+
+// ==================== Activity Log ====================
+
+const ACTIVITY_LOG_PREFIX = 'incident:activity:'
+
+async function getActivityLogKey(incidentId: string): Promise<string> {
+  return `${ACTIVITY_LOG_PREFIX}${incidentId}`
+}
+
+export interface ActivityLogEntry {
+  id: string
+  incident_id: string
+  timestamp: string
+  action: string
+  actor?: {
+    user_id: number
+    email?: string
+  }
+  details?: Record<string, unknown>
+}
+
+export async function logIncidentActivity(
+  env: Env,
+  incidentId: string,
+  action: string,
+  actor?: { user_id: number; email?: string },
+  details?: Record<string, unknown>
+): Promise<ActivityLogEntry> {
+  const entry: ActivityLogEntry = {
+    id: crypto.randomUUID(),
+    incident_id: incidentId,
+    timestamp: nowIso(),
+    action,
+    actor,
+    details,
+  }
+
+  const key = await getActivityLogKey(incidentId)
+  const existing = await env.KV.get(key, 'json') as ActivityLogEntry[] | null
+  const logs = existing || []
+  logs.unshift(entry)
+
+  // Keep last 100 entries
+  await env.KV.put(key, JSON.stringify(logs.slice(0, 100)), { expirationTtl: 86400 * 30 })
+
+  return entry
+}
+
+export async function getIncidentActivityLog(
+  env: Env,
+  incidentId: string
+): Promise<ActivityLogEntry[]> {
+  const key = await getActivityLogKey(incidentId)
+  const logs = await env.KV.get(key, 'json') as ActivityLogEntry[] | null
+  return logs || []
+}
+
+// ==================== Runbook Integration ====================
+
+export async function suggestRunbooks(
+  env: Env,
+  incident: IncidentRecord
+): Promise<Array<{ id: string; name: string; relevance: number }>> {
+  // Get all playbooks
+  const playbooksKey = 'playbook:index'
+  const playbookIds = (await env.KV.get(playbooksKey, 'json') as string[] | null) || []
+
+  const suggestions: Array<{ id: string; name: string; relevance: number }> = []
+
+  // Simple relevance scoring based on tags and keywords
+  const keywords = [
+    incident.title.toLowerCase(),
+    incident.summary?.toLowerCase() || '',
+    incident.source.toLowerCase(),
+    ...incident.tags.map(t => t.toLowerCase()),
+  ].join(' ')
+
+  for (const playbookId of playbookIds.slice(0, 20)) {
+    const playbook = await env.KV.get(`playbook:${playbookId}`, 'json') as {
+      id: number
+      name: string
+      category?: string
+      tags?: string
+    } | null
+
+    if (!playbook) continue
+
+    let relevance = 0
+
+    // Check category match
+    if (incident.action_type === 'restart_deployment' && playbook.category?.includes('kubernetes')) {
+      relevance += 50
+    }
+    if (incident.action_type === 'scale_deployment' && playbook.category?.includes('scaling')) {
+      relevance += 50
+    }
+
+    // Check tag matches
+    const playbookTags = (playbook.tags || '').toLowerCase()
+    for (const tag of incident.tags) {
+      if (playbookTags.includes(tag.toLowerCase())) {
+        relevance += 20
+      }
+    }
+
+    // Check keyword matches
+    const playbookName = playbook.name.toLowerCase()
+    for (const keyword of incident.tags) {
+      if (playbookName.includes(keyword.toLowerCase())) {
+        relevance += 10
+      }
+    }
+
+    if (relevance > 0) {
+      suggestions.push({
+        id: String(playbook.id),
+        name: playbook.name,
+        relevance,
+      })
+    }
+  }
+
+  return suggestions.sort((a, b) => b.relevance - a.relevance).slice(0, 5)
+}
+
+export async function executeRunbookForIncident(
+  env: Env,
+  incident: IncidentRecord,
+  playbookId: number,
+  principal: AuthPrincipal
+): Promise<{ task_id: string; status: string }> {
+  // This would typically create a task to execute the playbook
+  // For now, we log the activity and return a mock task ID
+
+  const taskId = crypto.randomUUID()
+
+  await logIncidentActivity(env, incident.id, 'runbook_executed', {
+    user_id: principal.sub,
+    email: principal.email,
+  }, {
+    playbook_id: playbookId,
+    task_id: taskId,
+  })
+
+  return {
+    task_id: taskId,
+    status: 'pending',
   }
 }
