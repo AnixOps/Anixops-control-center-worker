@@ -50,7 +50,94 @@ export interface HealthCheck {
   lastCheck: string
 }
 
-// Dashboard configuration
+export interface RuntimeServiceChecks {
+  database: HealthCheck
+  kv: HealthCheck
+  r2: HealthCheck
+}
+
+async function probeDatabase(env: Env): Promise<HealthCheck> {
+  const startedAt = Date.now()
+  const lastCheck = new Date().toISOString()
+
+  try {
+    await env.DB.prepare('SELECT 1').first()
+    return {
+      name: 'database',
+      status: 'healthy',
+      latency: Date.now() - startedAt,
+      lastCheck,
+    }
+  } catch (err) {
+    return {
+      name: 'database',
+      status: 'unhealthy',
+      latency: Date.now() - startedAt,
+      message: err instanceof Error ? err.message : 'Unknown error',
+      lastCheck,
+    }
+  }
+}
+
+async function probeKv(env: Env): Promise<HealthCheck> {
+  const startedAt = Date.now()
+  const lastCheck = new Date().toISOString()
+
+  try {
+    await env.KV.get('health:check')
+    return {
+      name: 'kv',
+      status: 'healthy',
+      latency: Date.now() - startedAt,
+      lastCheck,
+    }
+  } catch (err) {
+    return {
+      name: 'kv',
+      status: 'unhealthy',
+      latency: Date.now() - startedAt,
+      message: err instanceof Error ? err.message : 'Unknown error',
+      lastCheck,
+    }
+  }
+}
+
+async function probeR2(env: Env): Promise<HealthCheck> {
+  const startedAt = Date.now()
+  const lastCheck = new Date().toISOString()
+
+  try {
+    await env.R2.head('health:check')
+    return {
+      name: 'r2',
+      status: 'healthy',
+      latency: Date.now() - startedAt,
+      lastCheck,
+    }
+  } catch (err) {
+    return {
+      name: 'r2',
+      status: 'unhealthy',
+      latency: Date.now() - startedAt,
+      message: err instanceof Error ? err.message : 'Unknown error',
+      lastCheck,
+    }
+  }
+}
+
+export async function probeRuntimeServices(env: Env): Promise<RuntimeServiceChecks> {
+  const [database, kv, r2] = await Promise.all([
+    probeDatabase(env),
+    probeKv(env),
+    probeR2(env),
+  ])
+
+  return { database, kv, r2 }
+}
+
+/**
+ * Dashboard configuration
+ */
 export interface DashboardConfig {
   id: string
   name: string
@@ -120,11 +207,10 @@ export async function queryMetrics(
     endTime?: string
     labels?: Record<string, string>
     aggregation?: 'avg' | 'sum' | 'min' | 'max' | 'count'
-    interval?: string
   }
 ): Promise<{ success: boolean; data?: MetricPoint[] }> {
   try {
-    const { name, startTime, endTime, labels, aggregation, interval } = params
+    const { name, startTime, endTime, labels, aggregation } = params
 
     const start = startTime ? new Date(startTime) : new Date(Date.now() - 3600000)
     const end = endTime ? new Date(endTime) : new Date()

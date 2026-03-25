@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import { z } from 'zod'
-import type { Env, IncidentEvidence, IncidentLink } from '../types'
+import type { Env, IncidentEvidence, IncidentLink, IncidentRecord, IncidentTimelineEventType, IncidentSeverity, IncidentStatus } from '../types'
 import { logAudit } from '../utils/audit'
 import {
   addIncidentComment,
@@ -65,6 +65,160 @@ import {
   updateIncidentComment,
   updateIncidentTemplate,
   updatePostMortem,
+  // New functions
+  getIncidentDashboardMetrics,
+  findRelatedIncidents,
+  watchIncident,
+  unwatchIncident,
+  getIncidentWatchers,
+  createExternalTicket,
+  getExternalTickets,
+  updateExternalTicketStatus,
+  // Advanced features
+  listResponsePlaybooks,
+  getResponsePlaybook,
+  createResponsePlaybook,
+  updateResponsePlaybook,
+  deleteResponsePlaybook,
+  matchResponsePlaybooks,
+  startPlaybookExecution,
+  getPlaybookExecution,
+  completePlaybookStep,
+  skipPlaybookStep,
+  listCustomFieldDefinitions,
+  getCustomFieldDefinition,
+  createCustomFieldDefinition,
+  updateCustomFieldDefinition,
+  deleteCustomFieldDefinition,
+  setIncidentCustomField,
+  getIncidentCustomFields,
+  generateAIRootCauseAnalysis,
+  createWarRoom,
+  getWarRoom,
+  joinWarRoom,
+  leaveWarRoom,
+  addWarRoomMessage,
+  addWarRoomResource,
+  closeWarRoom,
+  exportIncidents,
+  getExportResult,
+  getExportDownload,
+  // Reviews
+  createIncidentReview,
+  getIncidentReviews,
+  completeIncidentReview,
+  // Analytics
+  calculateResponseAnalytics,
+  // Feedback
+  submitIncidentFeedback,
+  getIncidentFeedback,
+  // Cost
+  calculateIncidentCost,
+  getIncidentCost,
+  // Compliance
+  createComplianceRecord,
+  getComplianceRecord,
+  updateComplianceRequirement,
+  // On-call
+  listOnCallSchedules,
+  getOnCallSchedule,
+  createOnCallSchedule,
+  getCurrentOnCall,
+  // Checklists
+  getIncidentChecklists,
+  createIncidentChecklist,
+  updateChecklistItem,
+  // Change links
+  linkIncidentToChange,
+  getIncidentChanges,
+  // Run history
+  getIncidentRunHistory,
+  // Responder teams
+  listResponderTeams,
+  getResponderTeam,
+  createResponderTeam,
+  updateResponderTeam,
+  deleteResponderTeam,
+  // SLA calendars
+  listSLACalendars,
+  getSLACalendar,
+  createSLACalendar,
+  // Notification templates
+  listNotificationTemplates,
+  getNotificationTemplate,
+  createNotificationTemplate,
+  // Escalation rules
+  listEscalationRules,
+  createEscalationRule,
+  // Attachments
+  listIncidentAttachments,
+  uploadIncidentAttachment,
+  downloadIncidentAttachment,
+  deleteIncidentAttachment,
+  // Related items
+  listRelatedItems,
+  addRelatedItem,
+  removeRelatedItem,
+  // Response targets
+  listResponseTimeTargets,
+  createResponseTimeTarget,
+  // Integrations
+  listIntegrations,
+  createIntegration,
+  updateIntegration,
+  deleteIntegration,
+  // Timeline events
+  listTimelineEvents,
+  addTimelineEvent,
+  // Runbooks
+  listRunbooks,
+  getRunbook,
+  createRunbook,
+  updateRunbook,
+  deleteRunbook,
+  // Auto-remediation
+  listAutoRemediationRules,
+  createAutoRemediationRule,
+  updateAutoRemediationRule,
+  deleteAutoRemediationRule,
+  // Maintenance windows
+  listMaintenanceWindows,
+  getMaintenanceWindow,
+  createMaintenanceWindow,
+  updateMaintenanceWindow,
+  cancelMaintenanceWindow,
+  // Bulk operations
+  listBulkOperations,
+  getBulkOperation,
+  createBulkOperation,
+  executeBulkOperation,
+  // SLA breaches
+  listSLABreaches,
+  createSLABreach,
+  acknowledgeSLABreach,
+  // Analytics
+  listAnalyticsSnapshots,
+  generateAnalyticsSnapshot,
+  // Webhook subscriptions
+  listWebhookSubscriptions,
+  getWebhookSubscription,
+  createWebhookSubscription,
+  updateWebhookSubscription,
+  deleteWebhookSubscription,
+  // Snooze
+  listSnoozes,
+  createSnooze,
+  wakeSnooze,
+  // Merge
+  listMerges,
+  createMerge,
+  // Split
+  listSplits,
+  createSplit,
+  // Recurrence
+  listRecurrences,
+  detectRecurrence,
+  markRootCauseResolved,
 } from '../services/incidents'
 
 const createIncidentSchema = z.object({
@@ -944,6 +1098,34 @@ export async function getIncidentReportHandler(c: Context<{ Bindings: Env }>) {
   return c.json({ success: true, data: report })
 }
 
+async function handleIncidentMutation<TBody>(
+  c: Context<{ Bindings: Env }>,
+  action: string,
+  bodyParser: () => Promise<TBody>,
+  mutate: (env: Env, incident: IncidentRecord, body: TBody) => Promise<IncidentRecord>,
+  auditDetails: (incident: IncidentRecord, body: TBody) => Record<string, unknown>,
+) {
+  const principal = c.get('user')
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  try {
+    const body = await bodyParser()
+    const updated = await mutate(c.env, incident, body)
+
+    await logAudit(c, principal.sub, action, 'incident', auditDetails(incident, body))
+
+    return c.json({ success: true, data: toIncidentDetail(updated) })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
 // Link Management
 const linkSchema = z.object({
   kind: z.enum(['task', 'node', 'scaling_policy', 'deployment', 'runbook', 'alert', 'playbook']),
@@ -954,29 +1136,17 @@ const linkSchema = z.object({
 })
 
 export async function addIncidentLinkHandler(c: Context<{ Bindings: Env }>) {
-  const principal = c.get('user')
-  const incident = await requireIncident(c)
-  if (incident instanceof Response) {
-    return incident
-  }
-
-  try {
-    const body = linkSchema.parse(await c.req.json())
-    const updated = await addIncidentLink(c.env, incident, body as IncidentLink)
-
-    await logAudit(c, principal.sub, 'add_incident_link', 'incident', {
+  return handleIncidentMutation(
+    c,
+    'add_incident_link',
+    async () => linkSchema.parse(await c.req.json()) as IncidentLink,
+    (env, incident, body) => addIncidentLink(env, incident, body),
+    (incident, body) => ({
       incident_id: incident.id,
       link_kind: body.kind,
       link_id: body.id,
-    })
-
-    return c.json({ success: true, data: toIncidentDetail(updated) })
-  } catch (err) {
-    if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
-    }
-    throw err
-  }
+    }),
+  )
 }
 
 export async function removeIncidentLinkHandler(c: Context<{ Bindings: Env }>) {
@@ -1008,29 +1178,17 @@ const evidenceSchema = z.object({
 })
 
 export async function addIncidentEvidenceHandler(c: Context<{ Bindings: Env }>) {
-  const principal = c.get('user')
-  const incident = await requireIncident(c)
-  if (incident instanceof Response) {
-    return incident
-  }
-
-  try {
-    const body = evidenceSchema.parse(await c.req.json())
-    const updated = await addIncidentEvidence(c.env, incident, body as IncidentEvidence)
-
-    await logAudit(c, principal.sub, 'add_incident_evidence', 'incident', {
+  return handleIncidentMutation(
+    c,
+    'add_incident_evidence',
+    async () => evidenceSchema.parse(await c.req.json()) as IncidentEvidence,
+    (env, incident, body) => addIncidentEvidence(env, incident, body),
+    (incident, body) => ({
       incident_id: incident.id,
       evidence_type: body.type,
       evidence_source: body.source,
-    })
-
-    return c.json({ success: true, data: toIncidentDetail(updated) })
-  } catch (err) {
-    if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
-    }
-    throw err
-  }
+    }),
+  )
 }
 
 // Activity Log
@@ -1443,4 +1601,2388 @@ export async function updateActionItemHandler(c: Context<{ Bindings: Env }>) {
     }
     throw err
   }
+}
+
+// ==================== Dashboard Metrics ====================
+
+export async function getIncidentDashboardMetricsHandler(c: Context<{ Bindings: Env }>) {
+  const metrics = await getIncidentDashboardMetrics(c.env)
+  return c.json({ success: true, data: metrics })
+}
+
+// ==================== Incident Correlation ====================
+
+export async function getIncidentCorrelationHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+
+  // Verify incident exists
+  const incident = await getIncident(c.env, incidentId)
+  if (!incident) {
+    return c.json({ success: false, error: 'Incident not found' }, 404)
+  }
+
+  const correlation = await findRelatedIncidents(c.env, incidentId)
+  return c.json({ success: true, data: correlation })
+}
+
+// ==================== Incident Watch ====================
+
+const watchIncidentSchema = z.object({
+  notify_on: z.array(z.enum([
+    'created',
+    'acknowledged',
+    'escalated',
+    'assigned',
+    'merged',
+    'analyzed',
+    'approved',
+    'executing',
+    'resolved',
+    'failed',
+    'evidence_added',
+    'comment',
+    'severity_upgraded',
+    'link_added',
+    'runbook_executed',
+    'status_changed',
+  ])).min(1),
+})
+
+export async function watchIncidentHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  // Verify incident exists
+  const incident = await getIncident(c.env, incidentId)
+  if (!incident) {
+    return c.json({ success: false, error: 'Incident not found' }, 404)
+  }
+
+  try {
+    const body = watchIncidentSchema.parse(await c.req.json())
+    const watch = await watchIncident(c.env, incidentId, principal, body.notify_on as IncidentTimelineEventType[])
+
+    await logAudit(c, principal.sub, 'watch_incident', 'incident', {
+      incident_id: incidentId,
+      notify_on: body.notify_on,
+    })
+
+    return c.json({ success: true, data: watch }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function unwatchIncidentHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const removed = await unwatchIncident(c.env, incidentId, principal.sub)
+
+  if (!removed) {
+    return c.json({ success: false, error: 'Watch not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'unwatch_incident', 'incident', {
+    incident_id: incidentId,
+  })
+
+  return c.json({ success: true })
+}
+
+export async function getIncidentWatchersHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+
+  // Verify incident exists
+  const incident = await getIncident(c.env, incidentId)
+  if (!incident) {
+    return c.json({ success: false, error: 'Incident not found' }, 404)
+  }
+
+  const watchers = await getIncidentWatchers(c.env, incidentId)
+  return c.json({ success: true, data: watchers })
+}
+
+// ==================== External Tickets ====================
+
+const createExternalTicketSchema = z.object({
+  system: z.enum(['jira', 'servicenow', 'zendesk', 'linear']),
+  ticket_id: z.string().min(1),
+  ticket_url: z.string().url(),
+  status: z.string().min(1),
+})
+
+export async function createExternalTicketHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  // Verify incident exists
+  const incident = await getIncident(c.env, incidentId)
+  if (!incident) {
+    return c.json({ success: false, error: 'Incident not found' }, 404)
+  }
+
+  try {
+    const body = createExternalTicketSchema.parse(await c.req.json())
+    const ticket = await createExternalTicket(
+      c.env,
+      incidentId,
+      principal,
+      body.system,
+      body.ticket_id,
+      body.ticket_url,
+      body.status
+    )
+
+    await logAudit(c, principal.sub, 'create_external_ticket', 'incident', {
+      incident_id: incidentId,
+      system: body.system,
+      ticket_id: body.ticket_id,
+    })
+
+    return c.json({ success: true, data: ticket }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function listExternalTicketsHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+
+  // Verify incident exists
+  const incident = await getIncident(c.env, incidentId)
+  if (!incident) {
+    return c.json({ success: false, error: 'Incident not found' }, 404)
+  }
+
+  const tickets = await getExternalTickets(c.env, incidentId)
+  return c.json({ success: true, data: tickets })
+}
+
+const updateExternalTicketSchema = z.object({
+  status: z.string().min(1),
+})
+
+export async function updateExternalTicketHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+  const ticketId = c.req.param('ticketId') as string
+
+  try {
+    const body = updateExternalTicketSchema.parse(await c.req.json())
+    const ticket = await updateExternalTicketStatus(c.env, incidentId, ticketId, body.status)
+
+    if (!ticket) {
+      return c.json({ success: false, error: 'Ticket not found' }, 404)
+    }
+
+    await logAudit(c, principal.sub, 'update_external_ticket', 'incident', {
+      incident_id: incidentId,
+      ticket_id: ticketId,
+      status: body.status,
+    })
+
+    return c.json({ success: true, data: ticket })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+// ==================== Response Playbooks ====================
+
+const responsePlaybookStepSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  action: z.enum(['manual', 'automated', 'approval']),
+  automated_action: z.object({
+    type: z.enum(['run_playbook', 'restart_deployment', 'scale_deployment', 'execute_webhook', 'notify']),
+    ref: z.string(),
+    params: z.record(z.unknown()).optional(),
+  }).optional(),
+  estimated_duration_minutes: z.number().int().min(1).optional(),
+  required_role: z.enum(['admin', 'operator', 'viewer']).optional(),
+  checklist: z.array(z.string()).optional(),
+})
+
+const createResponsePlaybookSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().optional(),
+  category: z.string().optional(),
+  trigger_conditions: z.object({
+    severity: z.array(z.enum(['low', 'medium', 'high', 'critical'])).optional(),
+    source: z.array(z.string()).optional(),
+    action_type: z.array(z.enum(['scale_policy', 'restart_deployment', 'scale_deployment'])).optional(),
+    title_pattern: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+  }),
+  steps: z.array(responsePlaybookStepSchema).min(1),
+  auto_trigger: z.boolean().optional(),
+  estimated_total_duration_minutes: z.number().int().min(1).optional(),
+})
+
+export async function listResponsePlaybooksHandler(c: Context<{ Bindings: Env }>) {
+  const enabled = c.req.query('enabled') === 'true' ? true : c.req.query('enabled') === 'false' ? false : undefined
+  const playbooks = await listResponsePlaybooks(c.env, enabled)
+  return c.json({ success: true, data: playbooks })
+}
+
+export async function getResponsePlaybookHandler(c: Context<{ Bindings: Env }>) {
+  const playbookId = c.req.param('playbookId') as string
+  const playbook = await getResponsePlaybook(c.env, playbookId)
+
+  if (!playbook) {
+    return c.json({ success: false, error: 'Playbook not found' }, 404)
+  }
+
+  return c.json({ success: true, data: playbook })
+}
+
+export async function createResponsePlaybookHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  try {
+    const body = createResponsePlaybookSchema.parse(await c.req.json())
+    const playbook = await createResponsePlaybook(c.env, principal, body)
+
+    await logAudit(c, principal.sub, 'create_response_playbook', 'incident', {
+      playbook_id: playbook.id,
+      name: playbook.name,
+    })
+
+    return c.json({ success: true, data: playbook }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function updateResponsePlaybookHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const playbookId = c.req.param('playbookId') as string
+
+  try {
+    const body = createResponsePlaybookSchema.partial().parse(await c.req.json())
+
+    // Transform steps if provided - the service will add id and order
+    const updates: Parameters<typeof updateResponsePlaybook>[2] = {
+      ...body,
+      steps: body.steps as unknown as import('../types').ResponsePlaybookStep[] | undefined,
+    }
+
+    const playbook = await updateResponsePlaybook(c.env, playbookId, updates)
+
+    if (!playbook) {
+      return c.json({ success: false, error: 'Playbook not found' }, 404)
+    }
+
+    await logAudit(c, principal.sub, 'update_response_playbook', 'incident', {
+      playbook_id: playbookId,
+    })
+
+    return c.json({ success: true, data: playbook })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function deleteResponsePlaybookHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const playbookId = c.req.param('playbookId') as string
+
+  const deleted = await deleteResponsePlaybook(c.env, playbookId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Playbook not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_response_playbook', 'incident', {
+    playbook_id: playbookId,
+  })
+
+  return c.json({ success: true })
+}
+
+export async function matchResponsePlaybooksHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+
+  const incident = await getIncident(c.env, incidentId)
+  if (!incident) {
+    return c.json({ success: false, error: 'Incident not found' }, 404)
+  }
+
+  const playbooks = await matchResponsePlaybooks(c.env, incident)
+  return c.json({ success: true, data: playbooks })
+}
+
+export async function startPlaybookExecutionHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const body = z.object({ playbook_id: z.string() }).parse(await c.req.json())
+
+  try {
+    const execution = await startPlaybookExecution(c.env, incidentId, body.playbook_id, principal)
+
+    await logAudit(c, principal.sub, 'start_playbook_execution', 'incident', {
+      incident_id: incidentId,
+      playbook_id: body.playbook_id,
+      execution_id: execution.id,
+    })
+
+    return c.json({ success: true, data: execution }, 201)
+  } catch (err) {
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to start playbook' }, 400)
+  }
+}
+
+export async function getPlaybookExecutionHandler(c: Context<{ Bindings: Env }>) {
+  const executionId = c.req.param('executionId') as string
+  const execution = await getPlaybookExecution(c.env, executionId)
+
+  if (!execution) {
+    return c.json({ success: false, error: 'Execution not found' }, 404)
+  }
+
+  return c.json({ success: true, data: execution })
+}
+
+export async function completePlaybookStepHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const executionId = c.req.param('executionId') as string
+  const stepId = c.req.param('stepId') as string
+
+  const body = z.object({ result: z.record(z.unknown()).optional() }).parse(await c.req.json())
+
+  const execution = await completePlaybookStep(c.env, executionId, stepId, principal, body.result)
+
+  if (!execution) {
+    return c.json({ success: false, error: 'Execution not found or not running' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'complete_playbook_step', 'incident', {
+    execution_id: executionId,
+    step_id: stepId,
+  })
+
+  return c.json({ success: true, data: execution })
+}
+
+export async function skipPlaybookStepHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const executionId = c.req.param('executionId') as string
+  const stepId = c.req.param('stepId') as string
+
+  const body = z.object({ reason: z.string().min(1) }).parse(await c.req.json())
+
+  const execution = await skipPlaybookStep(c.env, executionId, stepId, principal, body.reason)
+
+  if (!execution) {
+    return c.json({ success: false, error: 'Execution not found or not running' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'skip_playbook_step', 'incident', {
+    execution_id: executionId,
+    step_id: stepId,
+    reason: body.reason,
+  })
+
+  return c.json({ success: true, data: execution })
+}
+
+// ==================== Custom Fields ====================
+
+const createCustomFieldSchema = z.object({
+  name: z.string().min(1).max(100),
+  key: z.string().min(1).max(50).regex(/^[a-z][a-z0-9_]*$/),
+  type: z.enum(['text', 'number', 'boolean', 'select', 'multiselect', 'date', 'datetime', 'user', 'url']),
+  required: z.boolean().optional(),
+  default_value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]).optional(),
+  options: z.array(z.string()).optional(),
+  validation: z.object({
+    min: z.number().optional(),
+    max: z.number().optional(),
+    pattern: z.string().optional(),
+    min_length: z.number().int().optional(),
+    max_length: z.number().int().optional(),
+  }).optional(),
+  description: z.string().optional(),
+  category: z.string().optional(),
+})
+
+export async function listCustomFieldsHandler(c: Context<{ Bindings: Env }>) {
+  const category = c.req.query('category')
+  const fields = await listCustomFieldDefinitions(c.env, category)
+  return c.json({ success: true, data: fields })
+}
+
+export async function getCustomFieldHandler(c: Context<{ Bindings: Env }>) {
+  const fieldId = c.req.param('fieldId') as string
+  const field = await getCustomFieldDefinition(c.env, fieldId)
+
+  if (!field) {
+    return c.json({ success: false, error: 'Field not found' }, 404)
+  }
+
+  return c.json({ success: true, data: field })
+}
+
+export async function createCustomFieldHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  try {
+    const body = createCustomFieldSchema.parse(await c.req.json())
+    const field = await createCustomFieldDefinition(c.env, principal, body)
+
+    await logAudit(c, principal.sub, 'create_custom_field', 'incident', {
+      field_id: field.id,
+      key: field.key,
+    })
+
+    return c.json({ success: true, data: field }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create field' }, 400)
+  }
+}
+
+export async function updateCustomFieldHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const fieldId = c.req.param('fieldId') as string
+
+  try {
+    const body = createCustomFieldSchema.partial().parse(await c.req.json())
+    const field = await updateCustomFieldDefinition(c.env, fieldId, body)
+
+    if (!field) {
+      return c.json({ success: false, error: 'Field not found' }, 404)
+    }
+
+    await logAudit(c, principal.sub, 'update_custom_field', 'incident', {
+      field_id: fieldId,
+    })
+
+    return c.json({ success: true, data: field })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function deleteCustomFieldHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const fieldId = c.req.param('fieldId') as string
+
+  const deleted = await deleteCustomFieldDefinition(c.env, fieldId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Field not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_custom_field', 'incident', {
+    field_id: fieldId,
+  })
+
+  return c.json({ success: true })
+}
+
+export async function setIncidentCustomFieldHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+  const fieldId = c.req.param('fieldId') as string
+
+  const body = z.object({
+    value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()]),
+  }).parse(await c.req.json())
+
+  try {
+    const fieldValue = await setIncidentCustomField(c.env, incidentId, fieldId, body.value, principal)
+
+    await logAudit(c, principal.sub, 'set_custom_field', 'incident', {
+      incident_id: incidentId,
+      field_id: fieldId,
+    })
+
+    return c.json({ success: true, data: fieldValue })
+  } catch (err) {
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to set field' }, 400)
+  }
+}
+
+export async function getIncidentCustomFieldsHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+
+  const incident = await getIncident(c.env, incidentId)
+  if (!incident) {
+    return c.json({ success: false, error: 'Incident not found' }, 404)
+  }
+
+  const fields = await getIncidentCustomFields(c.env, incidentId)
+  return c.json({ success: true, data: fields })
+}
+
+// ==================== AI Root Cause Analysis ====================
+
+export async function generateAIRootCauseAnalysisHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const incident = await getIncident(c.env, incidentId)
+  if (!incident) {
+    return c.json({ success: false, error: 'Incident not found' }, 404)
+  }
+
+  try {
+    const analysis = await generateAIRootCauseAnalysis(c.env, incidentId)
+
+    await logAudit(c, principal.sub, 'generate_ai_analysis', 'incident', {
+      incident_id: incidentId,
+    })
+
+    return c.json({ success: true, data: analysis })
+  } catch (err) {
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to generate analysis' }, 500)
+  }
+}
+
+// ==================== War Room ====================
+
+export async function createWarRoomHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  try {
+    const warRoom = await createWarRoom(c.env, incidentId, principal)
+
+    await logAudit(c, principal.sub, 'create_war_room', 'incident', {
+      incident_id: incidentId,
+      war_room_id: warRoom.id,
+    })
+
+    return c.json({ success: true, data: warRoom }, 201)
+  } catch (err) {
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create war room' }, 400)
+  }
+}
+
+export async function getWarRoomHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const warRoom = await getWarRoom(c.env, incidentId)
+
+  if (!warRoom) {
+    return c.json({ success: false, error: 'War room not found' }, 404)
+  }
+
+  return c.json({ success: true, data: warRoom })
+}
+
+export async function joinWarRoomHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const body = z.object({
+    role: z.enum(['commander', 'responder', 'observer']).optional(),
+  }).parse(await c.req.json())
+
+  const warRoom = await joinWarRoom(c.env, incidentId, principal, body.role)
+
+  if (!warRoom) {
+    return c.json({ success: false, error: 'War room not found or closed' }, 404)
+  }
+
+  return c.json({ success: true, data: warRoom })
+}
+
+export async function leaveWarRoomHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const warRoom = await leaveWarRoom(c.env, incidentId, principal)
+
+  if (!warRoom) {
+    return c.json({ success: false, error: 'War room not found' }, 404)
+  }
+
+  return c.json({ success: true, data: warRoom })
+}
+
+export async function addWarRoomMessageHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const body = z.object({ message: z.string().min(1).max(5000) }).parse(await c.req.json())
+
+  const warRoom = await addWarRoomMessage(c.env, incidentId, principal, body.message)
+
+  if (!warRoom) {
+    return c.json({ success: false, error: 'War room not found, closed, or not a participant' }, 404)
+  }
+
+  return c.json({ success: true, data: warRoom })
+}
+
+export async function addWarRoomResourceHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const body = z.object({
+    type: z.enum(['link', 'document', 'dashboard', 'log']),
+    title: z.string().min(1).max(200),
+    url: z.string().url(),
+  }).parse(await c.req.json())
+
+  const warRoom = await addWarRoomResource(c.env, incidentId, principal, body)
+
+  if (!warRoom) {
+    return c.json({ success: false, error: 'War room not found or closed' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'add_war_room_resource', 'incident', {
+    incident_id: incidentId,
+    resource_type: body.type,
+    resource_title: body.title,
+  })
+
+  return c.json({ success: true, data: warRoom })
+}
+
+export async function closeWarRoomHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const warRoom = await closeWarRoom(c.env, incidentId, principal)
+
+  if (!warRoom) {
+    return c.json({ success: false, error: 'War room not found or already closed' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'close_war_room', 'incident', {
+    incident_id: incidentId,
+  })
+
+  return c.json({ success: true, data: warRoom })
+}
+
+// ==================== Incident Export ====================
+
+const incidentExportSchema = z.object({
+  format: z.enum(['json', 'csv']),
+  include_evidence: z.boolean().optional(),
+  include_timeline: z.boolean().optional(),
+  include_comments: z.boolean().optional(),
+  include_recommendations: z.boolean().optional(),
+  include_links: z.boolean().optional(),
+  include_postmortem: z.boolean().optional(),
+  date_range: z.object({
+    start: z.string().datetime(),
+    end: z.string().datetime(),
+  }).optional(),
+  filters: z.object({
+    status: z.array(z.enum(['open', 'analyzed', 'approved', 'executing', 'resolved', 'failed'])).optional(),
+    severity: z.array(z.enum(['low', 'medium', 'high', 'critical'])).optional(),
+    source: z.array(z.string()).optional(),
+  }).optional(),
+})
+
+export async function exportIncidentsHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  try {
+    const body = incidentExportSchema.parse(await c.req.json())
+
+    // Provide defaults for optional boolean fields
+    const exportOptions: import('../types').IncidentExportOptions = {
+      format: body.format,
+      include_evidence: body.include_evidence ?? false,
+      include_timeline: body.include_timeline ?? false,
+      include_comments: body.include_comments ?? false,
+      include_recommendations: body.include_recommendations ?? false,
+      include_links: body.include_links ?? false,
+      include_postmortem: body.include_postmortem ?? false,
+      date_range: body.date_range,
+      filters: body.filters,
+    }
+
+    const result = await exportIncidents(c.env, exportOptions, principal)
+
+    await logAudit(c, principal.sub, 'export_incidents', 'incident', {
+      export_id: result.id,
+      format: body.format,
+      total_incidents: result.total_incidents,
+    })
+
+    return c.json({ success: true, data: result }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function getExportStatusHandler(c: Context<{ Bindings: Env }>) {
+  const exportId = c.req.param('exportId') as string
+  const result = await getExportResult(c.env, exportId)
+
+  if (!result) {
+    return c.json({ success: false, error: 'Export not found' }, 404)
+  }
+
+  return c.json({ success: true, data: result })
+}
+
+export async function downloadExportHandler(c: Context<{ Bindings: Env }>) {
+  const exportId = c.req.param('exportId') as string
+  const download = await getExportDownload(c.env, exportId)
+
+  if (!download) {
+    return c.json({ success: false, error: 'Export not found or not ready' }, 404)
+  }
+
+  return new Response(download.body, {
+    headers: {
+      'Content-Type': download.contentType,
+      'Content-Disposition': `attachment; filename="incidents-${exportId}.${download.contentType === 'application/json' ? 'json' : 'csv'}"`,
+    },
+  })
+}
+
+// ==================== Incident Reviews ====================
+
+const createReviewSchema = z.object({
+  scheduled_at: z.string().datetime(),
+  review_type: z.enum(['post_resolution', 'weekly', 'monthly', 'custom']),
+  attendees: z.array(z.object({
+    user_id: z.number(),
+    email: z.string().email(),
+    required: z.boolean().optional(),
+  })).optional(),
+  agenda: z.array(z.string()).optional(),
+})
+
+export async function createReviewHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  try {
+    const body = createReviewSchema.parse(await c.req.json())
+    const review = await createIncidentReview(c.env, incidentId, principal, body)
+
+    await logAudit(c, principal.sub, 'create_incident_review', 'incident', {
+      incident_id: incidentId,
+      review_id: review.id,
+    })
+
+    return c.json({ success: true, data: review }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create review' }, 400)
+  }
+}
+
+export async function listReviewsHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const reviews = await getIncidentReviews(c.env, incidentId)
+  return c.json({ success: true, data: reviews })
+}
+
+export async function completeReviewHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+  const reviewId = c.req.param('reviewId') as string
+
+  const body = z.object({
+    notes: z.string().optional(),
+    action_items: z.array(z.object({
+      description: z.string(),
+      owner_id: z.number().optional(),
+      due_date: z.string().optional(),
+    })).optional(),
+  }).parse(await c.req.json())
+
+  const review = await completeIncidentReview(c.env, incidentId, reviewId, principal, body.notes, body.action_items)
+
+  if (!review) {
+    return c.json({ success: false, error: 'Review not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'complete_incident_review', 'incident', {
+    incident_id: incidentId,
+    review_id: reviewId,
+  })
+
+  return c.json({ success: true, data: review })
+}
+
+// ==================== Response Analytics ====================
+
+export async function getResponseAnalyticsHandler(c: Context<{ Bindings: Env }>) {
+  const startDate = c.req.query('start_date')
+  const endDate = c.req.query('end_date')
+
+  if (!startDate || !endDate) {
+    return c.json({ success: false, error: 'start_date and end_date are required' }, 400)
+  }
+
+  const analytics = await calculateResponseAnalytics(c.env, startDate, endDate)
+  return c.json({ success: true, data: analytics })
+}
+
+// ==================== Incident Feedback ====================
+
+const submitFeedbackSchema = z.object({
+  ratings: z.object({
+    overall_satisfaction: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+    response_speed: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+    communication: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+    resolution_quality: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+  }),
+  strengths: z.array(z.string()).optional(),
+  improvements: z.array(z.string()).optional(),
+  additional_comments: z.string().optional(),
+  would_recommend: z.boolean(),
+})
+
+export async function submitFeedbackHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  try {
+    const body = submitFeedbackSchema.parse(await c.req.json())
+    const feedback = await submitIncidentFeedback(c.env, incidentId, principal, body)
+
+    await logAudit(c, principal.sub, 'submit_incident_feedback', 'incident', {
+      incident_id: incidentId,
+    })
+
+    return c.json({ success: true, data: feedback }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to submit feedback' }, 400)
+  }
+}
+
+export async function getFeedbackHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const feedback = await getIncidentFeedback(c.env, incidentId)
+
+  if (!feedback) {
+    return c.json({ success: false, error: 'Feedback not found' }, 404)
+  }
+
+  return c.json({ success: true, data: feedback })
+}
+
+// ==================== Incident Cost ====================
+
+const calculateCostSchema = z.object({
+  labor_hours: z.number().min(0),
+  labor_rate_usd: z.number().min(0).optional(),
+  infrastructure_cost_usd: z.number().min(0).optional(),
+  revenue_impact_usd: z.number().min(0).optional(),
+  third_party_cost_usd: z.number().min(0).optional(),
+  notes: z.string().optional(),
+})
+
+export async function calculateCostHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  try {
+    const body = calculateCostSchema.parse(await c.req.json())
+    const cost = await calculateIncidentCost(c.env, incidentId, principal, body)
+
+    await logAudit(c, principal.sub, 'calculate_incident_cost', 'incident', {
+      incident_id: incidentId,
+      total_cost: cost.estimated_cost_usd,
+    })
+
+    return c.json({ success: true, data: cost }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to calculate cost' }, 400)
+  }
+}
+
+export async function getCostHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const cost = await getIncidentCost(c.env, incidentId)
+
+  if (!cost) {
+    return c.json({ success: false, error: 'Cost not found' }, 404)
+  }
+
+  return c.json({ success: true, data: cost })
+}
+
+// ==================== Incident Compliance ====================
+
+const createComplianceSchema = z.object({
+  framework: z.enum(['soc2', 'iso27001', 'gdpr', 'hipaa', 'pci', 'custom']),
+  requirements: z.array(z.object({
+    requirement_id: z.string(),
+    description: z.string(),
+  })),
+})
+
+export async function createComplianceHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  try {
+    const body = createComplianceSchema.parse(await c.req.json())
+    const record = await createComplianceRecord(c.env, incidentId, principal, body.framework, body.requirements)
+
+    await logAudit(c, principal.sub, 'create_compliance_record', 'incident', {
+      incident_id: incidentId,
+      framework: body.framework,
+    })
+
+    return c.json({ success: true, data: record }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create compliance record' }, 400)
+  }
+}
+
+export async function getComplianceHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const record = await getComplianceRecord(c.env, incidentId)
+
+  if (!record) {
+    return c.json({ success: false, error: 'Compliance record not found' }, 404)
+  }
+
+  return c.json({ success: true, data: record })
+}
+
+export async function updateComplianceHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+  const requirementId = c.req.param('requirementId') as string
+
+  const body = z.object({
+    status: z.enum(['compliant', 'non_compliant', 'not_applicable']),
+    evidence: z.string().optional(),
+    notes: z.string().optional(),
+  }).parse(await c.req.json())
+
+  const record = await updateComplianceRequirement(
+    c.env,
+    incidentId,
+    requirementId,
+    body.status,
+    body.evidence,
+    body.notes,
+    principal
+  )
+
+  if (!record) {
+    return c.json({ success: false, error: 'Record or requirement not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'update_compliance_requirement', 'incident', {
+    incident_id: incidentId,
+    requirement_id: requirementId,
+    status: body.status,
+  })
+
+  return c.json({ success: true, data: record })
+}
+
+// ==================== On-Call Schedules ====================
+
+const createOnCallSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().optional(),
+  team: z.string().optional(),
+  rotation_type: z.enum(['weekly', 'biweekly', 'monthly', 'custom']),
+  rotation_config: z.object({
+    start_date: z.string().datetime(),
+    members: z.array(z.object({
+      user_id: z.number(),
+      email: z.string().email(),
+      order: z.number().int().min(1),
+    })).min(1),
+    handoff_time: z.string().regex(/^\d{2}:\d{2}$/),
+    handoff_day: z.number().int().min(0).max(6).optional(),
+  }),
+  timezone: z.string().optional(),
+})
+
+export async function listOnCallSchedulesHandler(c: Context<{ Bindings: Env }>) {
+  const enabled = c.req.query('enabled') === 'true' ? true : c.req.query('enabled') === 'false' ? false : undefined
+  const schedules = await listOnCallSchedules(c.env, enabled)
+  return c.json({ success: true, data: schedules })
+}
+
+export async function getOnCallScheduleHandler(c: Context<{ Bindings: Env }>) {
+  const scheduleId = c.req.param('scheduleId') as string
+  const schedule = await getOnCallSchedule(c.env, scheduleId)
+
+  if (!schedule) {
+    return c.json({ success: false, error: 'Schedule not found' }, 404)
+  }
+
+  return c.json({ success: true, data: schedule })
+}
+
+export async function createOnCallScheduleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  try {
+    const body = createOnCallSchema.parse(await c.req.json())
+    const schedule = await createOnCallSchedule(c.env, principal, body)
+
+    await logAudit(c, principal.sub, 'create_oncall_schedule', 'incident', {
+      schedule_id: schedule.id,
+      name: schedule.name,
+    })
+
+    return c.json({ success: true, data: schedule }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function getCurrentOnCallHandler(c: Context<{ Bindings: Env }>) {
+  const scheduleId = c.req.param('scheduleId') as string
+  const shift = await getCurrentOnCall(c.env, scheduleId)
+
+  if (!shift) {
+    return c.json({ success: false, error: 'No active on-call found' }, 404)
+  }
+
+  return c.json({ success: true, data: shift })
+}
+
+// ==================== Incident Checklists ====================
+
+export async function listChecklistsHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const checklists = await getIncidentChecklists(c.env, incidentId)
+  return c.json({ success: true, data: checklists })
+}
+
+export async function createChecklistHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    items: z.array(z.string().min(1)).min(1),
+  }).parse(await c.req.json())
+
+  const checklist = await createIncidentChecklist(c.env, incidentId, principal, body.name, body.items)
+
+  await logAudit(c, principal.sub, 'create_checklist', 'incident', {
+    incident_id: incidentId,
+    checklist_id: checklist.id,
+  })
+
+  return c.json({ success: true, data: checklist }, 201)
+}
+
+export async function updateChecklistItemHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+  const checklistId = c.req.param('checklistId') as string
+  const itemId = c.req.param('itemId') as string
+
+  const body = z.object({ checked: z.boolean() }).parse(await c.req.json())
+
+  const checklist = await updateChecklistItem(c.env, incidentId, checklistId, itemId, body.checked, principal)
+
+  if (!checklist) {
+    return c.json({ success: false, error: 'Checklist or item not found' }, 404)
+  }
+
+  return c.json({ success: true, data: checklist })
+}
+
+// ==================== Incident Change Links ====================
+
+const linkChangeSchema = z.object({
+  change_id: z.string().min(1),
+  change_type: z.enum(['deployment', 'configuration', 'infrastructure', 'schedule']),
+  change_description: z.string().optional(),
+  change_url: z.string().url().optional(),
+  change_timestamp: z.string().datetime(),
+  relationship: z.enum(['caused', 'contributed', 'resolved', 'related']),
+})
+
+export async function linkChangeHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  try {
+    const body = linkChangeSchema.parse(await c.req.json())
+    const link = await linkIncidentToChange(c.env, incidentId, principal, body)
+
+    await logAudit(c, principal.sub, 'link_change_to_incident', 'incident', {
+      incident_id: incidentId,
+      change_id: body.change_id,
+      relationship: body.relationship,
+    })
+
+    return c.json({ success: true, data: link }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function listChangesHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const changes = await getIncidentChanges(c.env, incidentId)
+  return c.json({ success: true, data: changes })
+}
+
+// ==================== Incident Run History ====================
+
+export async function listRunHistoryHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const history = await getIncidentRunHistory(c.env, incidentId)
+  return c.json({ success: true, data: history })
+}
+
+// ==================== Responder Teams ====================
+
+export async function listResponderTeamsHandler(c: Context<{ Bindings: Env }>) {
+  const teams = await listResponderTeams(c.env)
+  return c.json({ success: true, data: teams })
+}
+
+export async function getResponderTeamHandler(c: Context<{ Bindings: Env }>) {
+  const teamId = c.req.param('teamId') as string
+  const team = await getResponderTeam(c.env, teamId)
+
+  if (!team) {
+    return c.json({ success: false, error: 'Team not found' }, 404)
+  }
+
+  return c.json({ success: true, data: team })
+}
+
+export async function createResponderTeamHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    description: z.string().optional(),
+    members: z.array(z.object({
+      user_id: z.number(),
+      email: z.string().email(),
+      role: z.enum(['lead', 'responder', 'observer']),
+      skills: z.array(z.string()).optional(),
+    })).min(1),
+    services: z.array(z.string()).optional(),
+  }).parse(await c.req.json())
+
+  const team = await createResponderTeam(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_responder_team', 'incident', {
+    team_id: team.id,
+    name: team.name,
+  })
+
+  return c.json({ success: true, data: team }, 201)
+}
+
+export async function updateResponderTeamHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const teamId = c.req.param('teamId') as string
+
+  const body = z.object({
+    name: z.string().min(1).max(100).optional(),
+    description: z.string().optional(),
+    members: z.array(z.object({
+      user_id: z.number(),
+      email: z.string().email(),
+      role: z.enum(['lead', 'responder', 'observer']),
+      skills: z.array(z.string()).optional(),
+    })).optional(),
+    services: z.array(z.string()).optional(),
+  }).parse(await c.req.json())
+
+  const team = await updateResponderTeam(c.env, teamId, body)
+
+  if (!team) {
+    return c.json({ success: false, error: 'Team not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'update_responder_team', 'incident', {
+    team_id: teamId,
+  })
+
+  return c.json({ success: true, data: team })
+}
+
+export async function deleteResponderTeamHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const teamId = c.req.param('teamId') as string
+
+  const deleted = await deleteResponderTeam(c.env, teamId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Team not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_responder_team', 'incident', {
+    team_id: teamId,
+  })
+
+  return c.json({ success: true })
+}
+
+// ==================== SLA Calendars ====================
+
+export async function listSLACalendarsHandler(c: Context<{ Bindings: Env }>) {
+  const calendars = await listSLACalendars(c.env)
+  return c.json({ success: true, data: calendars })
+}
+
+export async function getSLACalendarHandler(c: Context<{ Bindings: Env }>) {
+  const calendarId = c.req.param('calendarId') as string
+  const calendar = await getSLACalendar(c.env, calendarId)
+
+  if (!calendar) {
+    return c.json({ success: false, error: 'Calendar not found' }, 404)
+  }
+
+  return c.json({ success: true, data: calendar })
+}
+
+export async function createSLACalendarHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    description: z.string().optional(),
+    timezone: z.string(),
+    working_hours: z.object({
+      start: z.string().regex(/^\d{2}:\d{2}$/),
+      end: z.string().regex(/^\d{2}:\d{2}$/),
+      days: z.array(z.number().int().min(0).max(6)),
+    }),
+    holidays: z.array(z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      name: z.string(),
+    })).optional(),
+    is_default: z.boolean().optional(),
+  }).parse(await c.req.json())
+
+  const calendar = await createSLACalendar(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_sla_calendar', 'incident', {
+    calendar_id: calendar.id,
+    name: calendar.name,
+  })
+
+  return c.json({ success: true, data: calendar }, 201)
+}
+
+// ==================== Notification Templates ====================
+
+export async function listNotificationTemplatesHandler(c: Context<{ Bindings: Env }>) {
+  const channel = c.req.query('channel')
+  const templates = await listNotificationTemplates(c.env, channel)
+  return c.json({ success: true, data: templates })
+}
+
+export async function getNotificationTemplateHandler(c: Context<{ Bindings: Env }>) {
+  const templateId = c.req.param('templateId') as string
+  const template = await getNotificationTemplate(c.env, templateId)
+
+  if (!template) {
+    return c.json({ success: false, error: 'Template not found' }, 404)
+  }
+
+  return c.json({ success: true, data: template })
+}
+
+export async function createNotificationTemplateHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    description: z.string().optional(),
+    channel: z.enum(['email', 'slack', 'teams', 'webhook', 'sms']),
+    event_type: z.enum([
+      'incident.created', 'incident.acknowledged', 'incident.escalated',
+      'incident.assigned', 'incident.analyzed', 'incident.approved',
+      'incident.executing', 'incident.resolved', 'incident.failed', 'all',
+    ]),
+    subject_template: z.string().optional(),
+    body_template: z.string().min(1),
+    variables: z.array(z.string()).optional(),
+  }).parse(await c.req.json())
+
+  const template = await createNotificationTemplate(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_notification_template', 'incident', {
+    template_id: template.id,
+    name: template.name,
+  })
+
+  return c.json({ success: true, data: template }, 201)
+}
+
+// ==================== Escalation Rules ====================
+
+export async function listEscalationRulesHandler(c: Context<{ Bindings: Env }>) {
+  const enabled = c.req.query('enabled') === 'true' ? true : c.req.query('enabled') === 'false' ? false : undefined
+  const rules = await listEscalationRules(c.env, enabled)
+  return c.json({ success: true, data: rules })
+}
+
+export async function createEscalationRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    description: z.string().optional(),
+    from_severity: z.enum(['low', 'medium', 'high', 'critical']),
+    to_severity: z.enum(['low', 'medium', 'high', 'critical']),
+    trigger_conditions: z.object({
+      time_without_ack_minutes: z.number().int().min(1).optional(),
+      time_without_assign_minutes: z.number().int().min(1).optional(),
+      time_without_resolve_minutes: z.number().int().min(1).optional(),
+    }),
+    actions: z.array(z.object({
+      type: z.enum(['notify', 'escalate', 'auto_assign']),
+      target: z.string(),
+    })),
+  }).parse(await c.req.json())
+
+  const rule = await createEscalationRule(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_escalation_rule', 'incident', {
+    rule_id: rule.id,
+    name: rule.name,
+  })
+
+  return c.json({ success: true, data: rule }, 201)
+}
+
+// ==================== Incident Attachments ====================
+
+export async function listAttachmentsHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const attachments = await listIncidentAttachments(c.env, incidentId)
+  return c.json({ success: true, data: attachments })
+}
+
+export async function uploadAttachmentHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  // Note: In a real implementation, you'd parse multipart/form-data
+  // This is a simplified version
+  const body = await c.req.json()
+  const { filename, content_type, content_base64, description } = body
+
+  const content = Uint8Array.from(atob(content_base64), c => c.charCodeAt(0)).buffer
+
+  const attachment = await uploadIncidentAttachment(c.env, incidentId, principal, {
+    filename,
+    contentType: content_type,
+    content,
+  }, description)
+
+  await logAudit(c, principal.sub, 'upload_attachment', 'incident', {
+    incident_id: incidentId,
+    attachment_id: attachment.id,
+    filename: attachment.filename,
+  })
+
+  return c.json({ success: true, data: attachment }, 201)
+}
+
+export async function downloadAttachmentHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const attachmentId = c.req.param('attachmentId') as string
+
+  const result = await downloadIncidentAttachment(c.env, incidentId, attachmentId)
+
+  if (!result) {
+    return c.json({ success: false, error: 'Attachment not found' }, 404)
+  }
+
+  return new Response(result.body, {
+    headers: {
+      'Content-Type': result.contentType,
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+    },
+  })
+}
+
+export async function deleteAttachmentHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+  const attachmentId = c.req.param('attachmentId') as string
+
+  const deleted = await deleteIncidentAttachment(c.env, incidentId, attachmentId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Attachment not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_attachment', 'incident', {
+    incident_id: incidentId,
+    attachment_id: attachmentId,
+  })
+
+  return c.json({ success: true })
+}
+
+// ==================== Related Items ====================
+
+export async function listRelatedItemsHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const itemType = c.req.query('item_type')
+  const items = await listRelatedItems(c.env, incidentId, itemType)
+  return c.json({ success: true, data: items })
+}
+
+export async function addRelatedItemHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const body = z.object({
+    item_type: z.enum(['log', 'metric', 'trace', 'alert', 'runbook', 'documentation', 'code', 'config']),
+    title: z.string().min(1).max(200),
+    description: z.string().optional(),
+    url: z.string().url().optional(),
+    content: z.string().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  }).parse(await c.req.json())
+
+  const item = await addRelatedItem(c.env, incidentId, principal, body)
+
+  await logAudit(c, principal.sub, 'add_related_item', 'incident', {
+    incident_id: incidentId,
+    item_id: item.id,
+    item_type: body.item_type,
+  })
+
+  return c.json({ success: true, data: item }, 201)
+}
+
+export async function removeRelatedItemHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+  const itemId = c.req.param('itemId') as string
+
+  const removed = await removeRelatedItem(c.env, incidentId, itemId)
+
+  if (!removed) {
+    return c.json({ success: false, error: 'Item not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'remove_related_item', 'incident', {
+    incident_id: incidentId,
+    item_id: itemId,
+  })
+
+  return c.json({ success: true })
+}
+
+// ==================== Response Time Targets ====================
+
+export async function listResponseTargetsHandler(c: Context<{ Bindings: Env }>) {
+  const enabled = c.req.query('enabled') === 'true' ? true : c.req.query('enabled') === 'false' ? false : undefined
+  const targets = await listResponseTimeTargets(c.env, enabled)
+  return c.json({ success: true, data: targets })
+}
+
+export async function createResponseTargetHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    severity: z.enum(['low', 'medium', 'high', 'critical']),
+    target_type: z.enum(['acknowledge', 'assign', 'resolve', 'first_response']),
+    target_minutes: z.number().int().min(1),
+    business_hours_only: z.boolean().optional(),
+    sla_calendar_id: z.string().optional(),
+  }).parse(await c.req.json())
+
+  const target = await createResponseTimeTarget(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_response_target', 'incident', {
+    target_id: target.id,
+    name: target.name,
+  })
+
+  return c.json({ success: true, data: target }, 201)
+}
+
+// ==================== Integrations ====================
+
+export async function listIntegrationsHandler(c: Context<{ Bindings: Env }>) {
+  const enabled = c.req.query('enabled') === 'true' ? true : c.req.query('enabled') === 'false' ? false : undefined
+  const integrations = await listIntegrations(c.env, enabled)
+  return c.json({ success: true, data: integrations })
+}
+
+export async function getIntegrationHandler(c: Context<{ Bindings: Env }>) {
+  const integrationId = c.req.param('integrationId') as string
+  const integrations = await listIntegrations(c.env)
+  const integration = integrations.find(i => i.id === integrationId)
+
+  if (!integration) {
+    return c.json({ success: false, error: 'Integration not found' }, 404)
+  }
+
+  return c.json({ success: true, data: integration })
+}
+
+export async function createIntegrationHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    type: z.enum(['pagerduty', 'opsgenie', 'datadog', 'newrelic', 'prometheus', 'grafana', 'slack', 'teams', 'custom']),
+    config: z.record(z.unknown()),
+    mapping_rules: z.array(z.object({
+      source_field: z.string(),
+      target_field: z.string(),
+      transform: z.string().optional(),
+    })).optional(),
+  }).parse(await c.req.json())
+
+  const integration = await createIntegration(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_integration', 'incident', {
+    integration_id: integration.id,
+    name: integration.name,
+    type: integration.type,
+  })
+
+  return c.json({ success: true, data: integration }, 201)
+}
+
+export async function updateIntegrationHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const integrationId = c.req.param('integrationId') as string
+
+  const body = z.object({
+    name: z.string().min(1).max(100).optional(),
+    enabled: z.boolean().optional(),
+    config: z.record(z.unknown()).optional(),
+    mapping_rules: z.array(z.object({
+      source_field: z.string(),
+      target_field: z.string(),
+      transform: z.string().optional(),
+    })).optional(),
+  }).parse(await c.req.json())
+
+  const integration = await updateIntegration(c.env, integrationId, body)
+
+  if (!integration) {
+    return c.json({ success: false, error: 'Integration not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'update_integration', 'incident', {
+    integration_id: integrationId,
+  })
+
+  return c.json({ success: true, data: integration })
+}
+
+export async function deleteIntegrationHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const integrationId = c.req.param('integrationId') as string
+
+  const deleted = await deleteIntegration(c.env, integrationId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Integration not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_integration', 'incident', {
+    integration_id: integrationId,
+  })
+
+  return c.json({ success: true })
+}
+
+// ==================== Timeline Events ====================
+
+export async function listTimelineEventsHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const events = await listTimelineEvents(c.env, incidentId)
+  return c.json({ success: true, data: events })
+}
+
+export async function addTimelineEventHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const body = z.object({
+    type: z.enum(['created', 'acknowledged', 'escalated', 'assigned', 'merged', 'analyzed', 'approved', 'executing', 'resolved', 'failed', 'evidence_added', 'comment', 'severity_upgraded']),
+    summary: z.string().min(1).max(1000),
+    details: z.record(z.unknown()).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  }).parse(await c.req.json())
+
+  const event = await addTimelineEvent(c.env, incidentId, {
+    ...body,
+    timestamp: new Date().toISOString(),
+    actor: {
+      user_id: principal.sub,
+      email: principal.email,
+    },
+  })
+
+  await logAudit(c, principal.sub, 'add_timeline_event', 'incident', {
+    incident_id: incidentId,
+    type: body.type,
+  })
+
+  return c.json({ success: true, data: event }, 201)
+}
+
+// ==================== Runbooks ====================
+
+export async function listRunbooksHandler(c: Context<{ Bindings: Env }>) {
+  const category = c.req.query('category')
+  const enabled = c.req.query('enabled') === 'true' ? true : c.req.query('enabled') === 'false' ? false : undefined
+  const runbooks = await listRunbooks(c.env, category, enabled)
+  return c.json({ success: true, data: runbooks })
+}
+
+export async function getRunbookHandler(c: Context<{ Bindings: Env }>) {
+  const runbookId = c.req.param('runbookId') as string
+  const runbook = await getRunbook(c.env, runbookId)
+
+  if (!runbook) {
+    return c.json({ success: false, error: 'Runbook not found' }, 404)
+  }
+
+  return c.json({ success: true, data: runbook })
+}
+
+export async function createRunbookHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    description: z.string().max(500).optional(),
+    category: z.enum(['incident_response', 'remediation', 'communication', 'escalation', 'recovery']),
+    triggers: z.array(z.object({
+      type: z.enum(['severity', 'source', 'tag', 'service']),
+      value: z.string(),
+    })),
+    steps: z.array(z.object({
+      id: z.string(),
+      order: z.number().int().min(0),
+      title: z.string().min(1).max(200),
+      description: z.string().max(1000).optional(),
+      action_type: z.enum(['manual', 'automated', 'approval', 'notification']),
+      action_config: z.object({
+        script: z.string().optional(),
+        api_endpoint: z.string().optional(),
+        notification_template_id: z.string().optional(),
+        approver_roles: z.array(z.string()).optional(),
+        timeout_minutes: z.number().int().optional(),
+      }).optional(),
+      required: z.boolean(),
+      estimated_minutes: z.number().int().min(1).optional(),
+    })),
+    auto_start: z.boolean(),
+    enabled: z.boolean(),
+  }).parse(await c.req.json())
+
+  const runbook = await createRunbook(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_runbook', 'incident', {
+    runbook_id: runbook.id,
+    name: runbook.name,
+  })
+
+  return c.json({ success: true, data: runbook }, 201)
+}
+
+export async function updateRunbookHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const runbookId = c.req.param('runbookId') as string
+
+  const body = z.object({
+    name: z.string().min(1).max(100).optional(),
+    description: z.string().max(500).optional(),
+    category: z.enum(['incident_response', 'remediation', 'communication', 'escalation', 'recovery']).optional(),
+    triggers: z.array(z.object({
+      type: z.enum(['severity', 'source', 'tag', 'service']),
+      value: z.string(),
+    })).optional(),
+    steps: z.array(z.object({
+      id: z.string(),
+      order: z.number().int().min(0),
+      title: z.string().min(1).max(200),
+      description: z.string().max(1000).optional(),
+      action_type: z.enum(['manual', 'automated', 'approval', 'notification']),
+      action_config: z.object({
+        script: z.string().optional(),
+        api_endpoint: z.string().optional(),
+        notification_template_id: z.string().optional(),
+        approver_roles: z.array(z.string()).optional(),
+        timeout_minutes: z.number().int().optional(),
+      }).optional(),
+      required: z.boolean(),
+      estimated_minutes: z.number().int().min(1).optional(),
+    })).optional(),
+    auto_start: z.boolean().optional(),
+    enabled: z.boolean().optional(),
+  }).parse(await c.req.json())
+
+  const runbook = await updateRunbook(c.env, runbookId, body)
+
+  if (!runbook) {
+    return c.json({ success: false, error: 'Runbook not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'update_runbook', 'incident', {
+    runbook_id: runbookId,
+  })
+
+  return c.json({ success: true, data: runbook })
+}
+
+export async function deleteRunbookHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const runbookId = c.req.param('runbookId') as string
+
+  const deleted = await deleteRunbook(c.env, runbookId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Runbook not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_runbook', 'incident', {
+    runbook_id: runbookId,
+  })
+
+  return c.json({ success: true })
+}
+
+// ==================== Auto-Remediation Rules ====================
+
+export async function listAutoRemediationRulesHandler(c: Context<{ Bindings: Env }>) {
+  const enabled = c.req.query('enabled') === 'true' ? true : c.req.query('enabled') === 'false' ? false : undefined
+  const rules = await listAutoRemediationRules(c.env, enabled)
+  return c.json({ success: true, data: rules })
+}
+
+export async function createAutoRemediationRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    description: z.string().max(500).optional(),
+    conditions: z.array(z.object({
+      field: z.enum(['severity', 'source', 'title_pattern', 'tag', 'service', 'metric_threshold']),
+      operator: z.enum(['equals', 'contains', 'matches', 'greater_than', 'less_than']),
+      value: z.union([z.string(), z.number()]),
+    })),
+    logical_operator: z.enum(['and', 'or']),
+    action: z.object({
+      type: z.enum(['run_playbook', 'execute_script', 'api_call', 'scale_service', 'restart_service']),
+      config: z.object({
+        playbook_id: z.string().optional(),
+        script: z.string().optional(),
+        api_endpoint: z.string().optional(),
+        api_method: z.string().optional(),
+        api_payload: z.record(z.unknown()).optional(),
+        service_name: z.string().optional(),
+        target_replicas: z.number().int().optional(),
+      }),
+    }),
+    requires_approval: z.boolean(),
+    approver_roles: z.array(z.string()),
+    cooldown_minutes: z.number().int().min(0),
+    max_executions_per_hour: z.number().int().min(1),
+    enabled: z.boolean(),
+  }).parse(await c.req.json())
+
+  const rule = await createAutoRemediationRule(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_auto_remediation_rule', 'incident', {
+    rule_id: rule.id,
+    name: rule.name,
+  })
+
+  return c.json({ success: true, data: rule }, 201)
+}
+
+export async function updateAutoRemediationRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const ruleId = c.req.param('ruleId') as string
+
+  const body = z.object({
+    name: z.string().min(1).max(100).optional(),
+    description: z.string().max(500).optional(),
+    conditions: z.array(z.object({
+      field: z.enum(['severity', 'source', 'title_pattern', 'tag', 'service', 'metric_threshold']),
+      operator: z.enum(['equals', 'contains', 'matches', 'greater_than', 'less_than']),
+      value: z.union([z.string(), z.number()]),
+    })).optional(),
+    logical_operator: z.enum(['and', 'or']).optional(),
+    action: z.object({
+      type: z.enum(['run_playbook', 'execute_script', 'api_call', 'scale_service', 'restart_service']),
+      config: z.object({
+        playbook_id: z.string().optional(),
+        script: z.string().optional(),
+        api_endpoint: z.string().optional(),
+        api_method: z.string().optional(),
+        api_payload: z.record(z.unknown()).optional(),
+        service_name: z.string().optional(),
+        target_replicas: z.number().int().optional(),
+      }),
+    }).optional(),
+    requires_approval: z.boolean().optional(),
+    approver_roles: z.array(z.string()).optional(),
+    cooldown_minutes: z.number().int().min(0).optional(),
+    max_executions_per_hour: z.number().int().min(1).optional(),
+    enabled: z.boolean().optional(),
+  }).parse(await c.req.json())
+
+  const rule = await updateAutoRemediationRule(c.env, ruleId, body)
+
+  if (!rule) {
+    return c.json({ success: false, error: 'Rule not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'update_auto_remediation_rule', 'incident', {
+    rule_id: ruleId,
+  })
+
+  return c.json({ success: true, data: rule })
+}
+
+export async function deleteAutoRemediationRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const ruleId = c.req.param('ruleId') as string
+
+  const deleted = await deleteAutoRemediationRule(c.env, ruleId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Rule not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_auto_remediation_rule', 'incident', {
+    rule_id: ruleId,
+  })
+
+  return c.json({ success: true })
+}
+
+// ==================== Maintenance Windows ====================
+
+export async function listMaintenanceWindowsHandler(c: Context<{ Bindings: Env }>) {
+  const status = c.req.query('status')
+  const service = c.req.query('service')
+  const windows = await listMaintenanceWindows(c.env, status, service)
+  return c.json({ success: true, data: windows })
+}
+
+export async function getMaintenanceWindowHandler(c: Context<{ Bindings: Env }>) {
+  const windowId = c.req.param('windowId') as string
+  const window = await getMaintenanceWindow(c.env, windowId)
+
+  if (!window) {
+    return c.json({ success: false, error: 'Maintenance window not found' }, 404)
+  }
+
+  return c.json({ success: true, data: window })
+}
+
+export async function createMaintenanceWindowHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    description: z.string().max(500).optional(),
+    services: z.array(z.string().min(1)),
+    start_time: z.string(),
+    end_time: z.string(),
+    timezone: z.string(),
+    recurring: z.object({
+      frequency: z.enum(['daily', 'weekly', 'monthly']),
+      interval: z.number().int().min(1),
+      end_date: z.string().optional(),
+    }).optional(),
+    suppress_alerts: z.boolean(),
+    suppress_notifications: z.boolean(),
+    auto_detect_incidents: z.boolean(),
+  }).parse(await c.req.json())
+
+  const window = await createMaintenanceWindow(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_maintenance_window', 'incident', {
+    window_id: window.id,
+    name: window.name,
+  })
+
+  return c.json({ success: true, data: window }, 201)
+}
+
+export async function updateMaintenanceWindowHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const windowId = c.req.param('windowId') as string
+
+  const body = z.object({
+    name: z.string().min(1).max(100).optional(),
+    description: z.string().max(500).optional(),
+    services: z.array(z.string().min(1)).optional(),
+    start_time: z.string().optional(),
+    end_time: z.string().optional(),
+    timezone: z.string().optional(),
+    recurring: z.object({
+      frequency: z.enum(['daily', 'weekly', 'monthly']),
+      interval: z.number().int().min(1),
+      end_date: z.string().optional(),
+    }).optional(),
+    suppress_alerts: z.boolean().optional(),
+    suppress_notifications: z.boolean().optional(),
+    auto_detect_incidents: z.boolean().optional(),
+    status: z.enum(['scheduled', 'active', 'completed', 'cancelled']).optional(),
+  }).parse(await c.req.json())
+
+  const window = await updateMaintenanceWindow(c.env, windowId, body)
+
+  if (!window) {
+    return c.json({ success: false, error: 'Maintenance window not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'update_maintenance_window', 'incident', {
+    window_id: windowId,
+  })
+
+  return c.json({ success: true, data: window })
+}
+
+export async function cancelMaintenanceWindowHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const windowId = c.req.param('windowId') as string
+
+  const cancelled = await cancelMaintenanceWindow(c.env, windowId)
+
+  if (!cancelled) {
+    return c.json({ success: false, error: 'Maintenance window not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'cancel_maintenance_window', 'incident', {
+    window_id: windowId,
+  })
+
+  return c.json({ success: true })
+}
+
+// ==================== Bulk Operations ====================
+
+export async function listBulkOperationsHandler(c: Context<{ Bindings: Env }>) {
+  const status = c.req.query('status')
+  const ops = await listBulkOperations(c.env, status)
+  return c.json({ success: true, data: ops })
+}
+
+export async function getBulkOperationHandler(c: Context<{ Bindings: Env }>) {
+  const operationId = c.req.param('operationId') as string
+  const op = await getBulkOperation(c.env, operationId)
+
+  if (!op) {
+    return c.json({ success: false, error: 'Bulk operation not found' }, 404)
+  }
+
+  return c.json({ success: true, data: op })
+}
+
+export async function createBulkOperationHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    operation_type: z.enum(['assign', 'status_change', 'severity_change', 'tag', 'close', 'escalate']),
+    incident_ids: z.array(z.string().min(1)).min(1).max(100),
+    payload: z.record(z.unknown()),
+  }).parse(await c.req.json())
+
+  const op = await createBulkOperation(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_bulk_operation', 'incident', {
+    operation_id: op.id,
+    operation_type: body.operation_type,
+    incident_count: body.incident_ids.length,
+  })
+
+  return c.json({ success: true, data: op }, 201)
+}
+
+export async function executeBulkOperationHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const operationId = c.req.param('operationId') as string
+
+  const op = await executeBulkOperation(c.env, operationId)
+
+  if (!op) {
+    return c.json({ success: false, error: 'Bulk operation not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'execute_bulk_operation', 'incident', {
+    operation_id: operationId,
+    status: op.status,
+    success_count: op.results.filter(r => r.success).length,
+    failure_count: op.results.filter(r => !r.success).length,
+  })
+
+  return c.json({ success: true, data: op })
+}
+
+// ==================== SLA Breaches ====================
+
+export async function listSLABreachesHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.query('incident_id')
+  const severity = c.req.query('severity') as IncidentSeverity | undefined
+  const breaches = await listSLABreaches(c.env, incidentId, severity)
+  return c.json({ success: true, data: breaches })
+}
+
+export async function acknowledgeSLABreachHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const breachId = c.req.param('breachId') as string
+
+  const breach = await acknowledgeSLABreach(c.env, breachId)
+
+  if (!breach) {
+    return c.json({ success: false, error: 'SLA breach not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'acknowledge_sla_breach', 'incident', {
+    breach_id: breachId,
+    incident_id: breach.incident_id,
+  })
+
+  return c.json({ success: true, data: breach })
+}
+
+// ==================== Analytics ====================
+
+export async function listAnalyticsSnapshotsHandler(c: Context<{ Bindings: Env }>) {
+  const period = c.req.query('period')
+  const startDate = c.req.query('start_date')
+  const endDate = c.req.query('end_date')
+  const snapshots = await listAnalyticsSnapshots(c.env, period, startDate, endDate)
+  return c.json({ success: true, data: snapshots })
+}
+
+export async function generateAnalyticsSnapshotHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    date: z.string(),
+    period: z.enum(['daily', 'weekly', 'monthly']),
+  }).parse(await c.req.json())
+
+  const snapshot = await generateAnalyticsSnapshot(c.env, body.date, body.period)
+
+  await logAudit(c, principal.sub, 'generate_analytics_snapshot', 'incident', {
+    snapshot_id: snapshot.id,
+    date: body.date,
+    period: body.period,
+  })
+
+  return c.json({ success: true, data: snapshot }, 201)
+}
+
+// ==================== Webhook Subscriptions ====================
+
+export async function listWebhookSubscriptionsHandler(c: Context<{ Bindings: Env }>) {
+  const enabled = c.req.query('enabled') === 'true' ? true : c.req.query('enabled') === 'false' ? false : undefined
+  const subs = await listWebhookSubscriptions(c.env, enabled)
+  return c.json({ success: true, data: subs })
+}
+
+export async function getWebhookSubscriptionHandler(c: Context<{ Bindings: Env }>) {
+  const subscriptionId = c.req.param('subscriptionId') as string
+  const sub = await getWebhookSubscription(c.env, subscriptionId)
+
+  if (!sub) {
+    return c.json({ success: false, error: 'Webhook subscription not found' }, 404)
+  }
+
+  return c.json({ success: true, data: sub })
+}
+
+export async function createWebhookSubscriptionHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  const body = z.object({
+    name: z.string().min(1).max(100),
+    description: z.string().max(500).optional(),
+    url: z.string().url(),
+    secret: z.string().optional(),
+    events: z.array(z.enum(['incident.created', 'incident.acknowledged', 'incident.escalated', 'incident.assigned', 'incident.analyzed', 'incident.approved', 'incident.executing', 'incident.resolved', 'incident.failed'])),
+    filters: z.object({
+      severities: z.array(z.enum(['low', 'medium', 'high', 'critical'])).optional(),
+      services: z.array(z.string()).optional(),
+      tags: z.array(z.string()).optional(),
+    }).optional(),
+    headers: z.record(z.string()).optional(),
+    retry_policy: z.object({
+      max_retries: z.number().int().min(0).max(10),
+      backoff_multiplier: z.number().min(1).max(10),
+      initial_delay_ms: z.number().int().min(100).max(60000),
+    }),
+    enabled: z.boolean(),
+  }).parse(await c.req.json())
+
+  const sub = await createWebhookSubscription(c.env, principal, body)
+
+  await logAudit(c, principal.sub, 'create_webhook_subscription', 'incident', {
+    subscription_id: sub.id,
+    name: sub.name,
+    url: sub.url,
+  })
+
+  return c.json({ success: true, data: sub }, 201)
+}
+
+export async function updateWebhookSubscriptionHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const subscriptionId = c.req.param('subscriptionId') as string
+
+  const body = z.object({
+    name: z.string().min(1).max(100).optional(),
+    description: z.string().max(500).optional(),
+    url: z.string().url().optional(),
+    secret: z.string().optional(),
+    events: z.array(z.enum(['incident.created', 'incident.acknowledged', 'incident.escalated', 'incident.assigned', 'incident.analyzed', 'incident.approved', 'incident.executing', 'incident.resolved', 'incident.failed'])).optional(),
+    filters: z.object({
+      severities: z.array(z.enum(['low', 'medium', 'high', 'critical'])).optional(),
+      services: z.array(z.string()).optional(),
+      tags: z.array(z.string()).optional(),
+    }).optional(),
+    headers: z.record(z.string()).optional(),
+    retry_policy: z.object({
+      max_retries: z.number().int().min(0).max(10),
+      backoff_multiplier: z.number().min(1).max(10),
+      initial_delay_ms: z.number().int().min(100).max(60000),
+    }).optional(),
+    enabled: z.boolean().optional(),
+  }).parse(await c.req.json())
+
+  const sub = await updateWebhookSubscription(c.env, subscriptionId, body)
+
+  if (!sub) {
+    return c.json({ success: false, error: 'Webhook subscription not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'update_webhook_subscription', 'incident', {
+    subscription_id: subscriptionId,
+  })
+
+  return c.json({ success: true, data: sub })
+}
+
+export async function deleteWebhookSubscriptionHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const subscriptionId = c.req.param('subscriptionId') as string
+
+  const deleted = await deleteWebhookSubscription(c.env, subscriptionId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Webhook subscription not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_webhook_subscription', 'incident', {
+    subscription_id: subscriptionId,
+  })
+
+  return c.json({ success: true })
+}
+
+// ==================== Snooze ====================
+
+export async function listSnoozesHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.query('incident_id')
+  const status = c.req.query('status')
+  const snoozes = await listSnoozes(c.env, incidentId, status)
+  return c.json({ success: true, data: snoozes })
+}
+
+export async function createSnoozeHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const body = z.object({
+    wake_at: z.string(),
+    reason: z.string().min(1).max(500),
+  }).parse(await c.req.json())
+
+  const snooze = await createSnooze(c.env, incidentId, principal, body.wake_at, body.reason)
+
+  await logAudit(c, principal.sub, 'create_snooze', 'incident', {
+    incident_id: incidentId,
+    snooze_id: snooze.id,
+    wake_at: body.wake_at,
+  })
+
+  return c.json({ success: true, data: snooze }, 201)
+}
+
+export async function wakeSnoozeHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const snoozeId = c.req.param('snoozeId') as string
+
+  const snooze = await wakeSnooze(c.env, snoozeId, principal)
+
+  if (!snooze) {
+    return c.json({ success: false, error: 'Snooze not found or already woke' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'wake_snooze', 'incident', {
+    snooze_id: snoozeId,
+    incident_id: snooze.incident_id,
+  })
+
+  return c.json({ success: true, data: snooze })
+}
+
+// ==================== Merge ====================
+
+export async function listMergesHandler(c: Context<{ Bindings: Env }>) {
+  const primaryIncidentId = c.req.query('primary_incident_id')
+  const merges = await listMerges(c.env, primaryIncidentId)
+  return c.json({ success: true, data: merges })
+}
+
+export async function createMergeHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const body = z.object({
+    merged_incident_ids: z.array(z.string().min(1)).min(1).max(10),
+    reason: z.string().min(1).max(1000),
+    preserve_sub_incidents: z.boolean().optional(),
+  }).parse(await c.req.json())
+
+  const merge = await createMerge(c.env, incidentId, body.merged_incident_ids, principal, body.reason, body.preserve_sub_incidents)
+
+  await logAudit(c, principal.sub, 'merge_incidents', 'incident', {
+    primary_incident_id: incidentId,
+    merged_incident_ids: body.merged_incident_ids,
+    merge_id: merge.id,
+  })
+
+  return c.json({ success: true, data: merge }, 201)
+}
+
+// ==================== Split ====================
+
+export async function listSplitsHandler(c: Context<{ Bindings: Env }>) {
+  const sourceIncidentId = c.req.query('source_incident_id')
+  const splits = await listSplits(c.env, sourceIncidentId)
+  return c.json({ success: true, data: splits })
+}
+
+export async function createSplitHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const body = z.object({
+    new_incidents: z.array(z.object({
+      title: z.string().min(1).max(200),
+      description: z.string().max(2000).optional(),
+      severity: z.enum(['low', 'medium', 'high', 'critical']),
+      evidence_ids: z.array(z.string()).optional(),
+    })).min(2).max(5),
+    reason: z.string().min(1).max(1000),
+  }).parse(await c.req.json())
+
+  const split = await createSplit(c.env, incidentId, body.new_incidents, principal, body.reason)
+
+  await logAudit(c, principal.sub, 'split_incident', 'incident', {
+    source_incident_id: incidentId,
+    new_incident_count: body.new_incidents.length,
+    split_id: split.id,
+  })
+
+  return c.json({ success: true, data: split }, 201)
+}
+
+// ==================== Recurrence ====================
+
+export async function listRecurrencesHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.query('incident_id')
+  const recurrences = await listRecurrences(c.env, incidentId)
+  return c.json({ success: true, data: recurrences })
+}
+
+export async function detectRecurrenceHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  const incident = await getIncident(c.env, incidentId)
+
+  if (!incident) {
+    return c.json({ success: false, error: 'Incident not found' }, 404)
+  }
+
+  const recurrence = await detectRecurrence(c.env, incident)
+
+  await logAudit(c, principal.sub, 'detect_recurrence', 'incident', {
+    incident_id: incidentId,
+    recurrence_detected: !!recurrence,
+  })
+
+  return c.json({ success: true, data: recurrence })
+}
+
+export async function markRootCauseResolvedHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const recurrenceId = c.req.param('recurrenceId') as string
+
+  const recurrence = await markRootCauseResolved(c.env, recurrenceId)
+
+  if (!recurrence) {
+    return c.json({ success: false, error: 'Recurrence not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'mark_root_cause_resolved', 'incident', {
+    recurrence_id: recurrenceId,
+    incident_id: recurrence.incident_id,
+  })
+
+  return c.json({ success: true, data: recurrence })
 }

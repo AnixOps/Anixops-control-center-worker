@@ -6,6 +6,8 @@
 
 import type { Context } from 'hono'
 import type { Env } from '../types'
+import { writeAnalyticsEvent } from '../services/analytics'
+import { probeRuntimeServices } from '../services/monitoring'
 
 interface MetricValue {
   name: string
@@ -46,32 +48,14 @@ function formatMetric(metric: MetricValue): string {
 async function collectMetrics(env: Env): Promise<MetricValue[]> {
   const metrics: MetricValue[] = []
 
-  // Database metrics
-  const userCount = await env.DB
-    .prepare('SELECT COUNT(*) as count FROM users')
-    .first<{ count: number }>()
-
-  const nodeCount = await env.DB
-    .prepare('SELECT COUNT(*) as count FROM nodes')
-    .first<{ count: number }>()
-
-  const taskCount = await env.DB
-    .prepare('SELECT COUNT(*) as count FROM tasks')
-    .first<{ count: number }>()
-
-  const playbookCount = await env.DB
-    .prepare('SELECT COUNT(*) as count FROM playbooks')
-    .first<{ count: number }>()
-
-  // Node status breakdown
-  const nodeStatus = await env.DB
-    .prepare('SELECT status, COUNT(*) as count FROM nodes GROUP BY status')
-    .all<{ status: string; count: number }>()
-
-  // Task status breakdown
-  const taskStatus = await env.DB
-    .prepare('SELECT status, COUNT(*) as count FROM tasks GROUP BY status')
-    .all<{ status: string; count: number }>()
+  const [userCount, nodeCount, taskCount, playbookCount, nodeStatus, taskStatus] = await Promise.all([
+    env.DB.prepare('SELECT COUNT(*) as count FROM users').first<{ count: number }>(),
+    env.DB.prepare('SELECT COUNT(*) as count FROM nodes').first<{ count: number }>(),
+    env.DB.prepare('SELECT COUNT(*) as count FROM tasks').first<{ count: number }>(),
+    env.DB.prepare('SELECT COUNT(*) as count FROM playbooks').first<{ count: number }>(),
+    env.DB.prepare('SELECT status, COUNT(*) as count FROM nodes GROUP BY status').all<{ status: string; count: number }>(),
+    env.DB.prepare('SELECT status, COUNT(*) as count FROM tasks GROUP BY status').all<{ status: string; count: number }>(),
+  ])
 
   // Basic counts
   metrics.push({
@@ -131,7 +115,8 @@ async function collectMetrics(env: Env): Promise<MetricValue[]> {
     type: 'gauge',
     value: 1,
     labels: {
-      version: '1.0.0',
+      version: env.APP_VERSION || '1.0.0',
+      build_sha: env.BUILD_SHA || 'unknown',
       phase: '4',
     },
   })
@@ -155,6 +140,11 @@ export async function prometheusMetricsHandler(c: Context<{ Bindings: Env }>) {
     const metrics = await collectMetrics(c.env)
     const output = metrics.map(formatMetric).join('\n')
 
+    writeAnalyticsEvent(c.env, {
+      indexes: ['metrics.scrape', c.env.APP_VERSION || '1.0.0', c.env.ENVIRONMENT],
+      doubles: [metrics.length],
+    })
+
     return c.text(output + '\n', 200, {
       'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
       'Cache-Control': 'no-cache',
@@ -171,62 +161,30 @@ export async function prometheusMetricsHandler(c: Context<{ Bindings: Env }>) {
  * Health check with detailed status
  */
 export async function detailedHealthHandler(c: Context<{ Bindings: Env }>) {
-  const checks: Record<string, { status: string; latency?: number; error?: string }> = {}
-
-  // Check database
-  const dbStart = Date.now()
-  try {
-    await c.env.DB.prepare('SELECT 1').first()
-    checks.database = {
-      status: 'healthy',
-      latency: Date.now() - dbStart,
-    }
-  } catch (err) {
-    checks.database = {
-      status: 'unhealthy',
-      error: err instanceof Error ? err.message : 'Unknown error',
-    }
-  }
-
-  // Check KV
-  const kvStart = Date.now()
-  try {
-    await c.env.KV.put('health:check', 'ok', { expirationTtl: 60 })
-    const value = await c.env.KV.get('health:check')
-    checks.kv = {
-      status: value === 'ok' ? 'healthy' : 'unhealthy',
-      latency: Date.now() - kvStart,
-    }
-  } catch (err) {
-    checks.kv = {
-      status: 'unhealthy',
-      error: err instanceof Error ? err.message : 'Unknown error',
-    }
-  }
-
-  // Check R2
-  const r2Start = Date.now()
-  try {
-    await c.env.R2.put('health/check', 'ok')
-    checks.r2 = {
-      status: 'healthy',
-      latency: Date.now() - r2Start,
-    }
-  } catch (err) {
-    checks.r2 = {
-      status: 'unhealthy',
-      error: err instanceof Error ? err.message : 'Unknown error',
-    }
-  }
-
-  // Overall status
-  const allHealthy = Object.values(checks).every(c => c.status === 'healthy')
+  const checks = await probeRuntimeServices(c.env)
+  const allHealthy = Object.values(checks).every(check => check.status === 'healthy')
 
   return c.json({
     status: allHealthy ? 'healthy' : 'degraded',
     timestamp: new Date().toISOString(),
-    version: '1.0.0-rc.17',
-    checks,
+    version: c.env.APP_VERSION || '1.0.0',
+    checks: {
+      database: {
+        status: checks.database.status,
+        latency: checks.database.latency,
+        ...(checks.database.message ? { error: checks.database.message } : {}),
+      },
+      kv: {
+        status: checks.kv.status,
+        latency: checks.kv.latency,
+        ...(checks.kv.message ? { error: checks.kv.message } : {}),
+      },
+      r2: {
+        status: checks.r2.status,
+        latency: checks.r2.latency,
+        ...(checks.r2.message ? { error: checks.r2.message } : {}),
+      },
+    },
   }, allHealthy ? 200 : 503)
 }
 

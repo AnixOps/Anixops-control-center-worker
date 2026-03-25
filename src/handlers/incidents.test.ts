@@ -892,4 +892,1013 @@ describe('incident handlers', () => {
     expect(searchData.success).toBe(true)
     expect(searchData.data?.total).toBe(0)
   })
+
+  // Dashboard Metrics Tests
+  it('returns dashboard metrics', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'dashboard@example.com', 'Dashboard123!', 'admin')
+
+    // Create some incidents
+    await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Critical incident',
+        source: 'monitoring',
+        severity: 'critical',
+      }),
+    }, env)
+
+    await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'High incident',
+        source: 'monitoring',
+        severity: 'high',
+      }),
+    }, env)
+
+    const metricsRes = await app.request('/api/v1/incidents/dashboard/metrics', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(metricsRes.status).toBe(200)
+    const metricsData = await metricsRes.json() as {
+      success: boolean
+      data?: {
+        current: { open_incidents: number; critical_incidents: number }
+        last_24h: { created: number }
+        last_7d: { created: number }
+        last_30d: { created: number }
+      }
+    }
+    expect(metricsData.success).toBe(true)
+    expect(metricsData.data?.current.open_incidents).toBeGreaterThanOrEqual(2)
+    expect(metricsData.data?.current.critical_incidents).toBeGreaterThanOrEqual(1)
+    expect(metricsData.data?.last_24h.created).toBeGreaterThanOrEqual(2)
+  })
+
+  // Incident Correlation Tests
+  it('finds related incidents with correlation', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'correlation@example.com', 'Correlation123!', 'admin')
+
+    // Create incidents with same correlation_id
+    const createRes1 = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'First related incident',
+        source: 'monitoring',
+        severity: 'high',
+        correlation_id: 'related-test-001',
+      }),
+    }, env)
+
+    const data1 = await createRes1.json() as { data?: { id: string } }
+
+    await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Second related incident',
+        source: 'monitoring',
+        severity: 'high',
+        correlation_id: 'related-test-001',
+      }),
+    }, env)
+
+    const correlationRes = await app.request(`/api/v1/incidents/${data1.data?.id}/correlation`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(correlationRes.status).toBe(200)
+    const correlationData = await correlationRes.json() as {
+      success: boolean
+      data?: {
+        incident_id: string
+        related_incidents: Array<{ id: string; correlation_score: number }>
+      }
+    }
+    expect(correlationData.success).toBe(true)
+    expect(correlationData.data?.incident_id).toBe(data1.data?.id)
+  })
+
+  // Incident Watch Tests
+  it('allows user to watch and unwatch an incident', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'watch@example.com', 'Watch123!', 'admin')
+
+    const createRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Watchable incident',
+        source: 'test',
+        severity: 'medium',
+      }),
+    }, env)
+
+    const createData = await createRes.json() as { data?: { id: string } }
+    const incidentId = createData.data?.id
+
+    // Watch the incident
+    const watchRes = await app.request(`/api/v1/incidents/${incidentId}/watch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        notify_on: ['resolved', 'escalated', 'comment'],
+      }),
+    }, env)
+
+    expect(watchRes.status).toBe(201)
+    const watchData = await watchRes.json() as { success: boolean; data?: { incident_id: string; notify_on: string[] } }
+    expect(watchData.success).toBe(true)
+    expect(watchData.data?.incident_id).toBe(incidentId)
+    expect(watchData.data?.notify_on).toContain('resolved')
+
+    // Get watchers
+    const watchersRes = await app.request(`/api/v1/incidents/${incidentId}/watchers`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(watchersRes.status).toBe(200)
+    const watchersData = await watchersRes.json() as { success: boolean; data?: Array<{ incident_id: string }> }
+    expect(watchersData.success).toBe(true)
+    expect(watchersData.data?.length).toBeGreaterThanOrEqual(1)
+
+    // Unwatch the incident
+    const unwatchRes = await app.request(`/api/v1/incidents/${incidentId}/watch`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(unwatchRes.status).toBe(200)
+  })
+
+  // External Ticket Tests
+  it('creates and updates external tickets', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'ticket@example.com', 'Ticket123!', 'admin')
+
+    const createRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Incident with external ticket',
+        source: 'test',
+        severity: 'high',
+      }),
+    }, env)
+
+    const createData = await createRes.json() as { data?: { id: string } }
+    const incidentId = createData.data?.id
+
+    // Create external ticket
+    const ticketRes = await app.request(`/api/v1/incidents/${incidentId}/tickets`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        system: 'jira',
+        ticket_id: 'OPS-12345',
+        ticket_url: 'https://jira.example.com/browse/OPS-12345',
+        status: 'Open',
+      }),
+    }, env)
+
+    expect(ticketRes.status).toBe(201)
+    const ticketData = await ticketRes.json() as { success: boolean; data?: { system: string; ticket_id: string; status: string } }
+    expect(ticketData.success).toBe(true)
+    expect(ticketData.data?.system).toBe('jira')
+    expect(ticketData.data?.ticket_id).toBe('OPS-12345')
+
+    // List tickets
+    const listRes = await app.request(`/api/v1/incidents/${incidentId}/tickets`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(listRes.status).toBe(200)
+    const listData = await listRes.json() as { success: boolean; data?: Array<{ ticket_id: string }> }
+    expect(listData.success).toBe(true)
+    expect(listData.data?.some(t => t.ticket_id === 'OPS-12345')).toBe(true)
+
+    // Update ticket status
+    const updateRes = await app.request(`/api/v1/incidents/${incidentId}/tickets/OPS-12345`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        status: 'In Progress',
+      }),
+    }, env)
+
+    expect(updateRes.status).toBe(200)
+    const updateData = await updateRes.json() as { success: boolean; data?: { status: string } }
+    expect(updateData.success).toBe(true)
+    expect(updateData.data?.status).toBe('In Progress')
+  })
+
+  // Response Playbook Tests
+  it('creates and executes a response playbook', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'playbook@example.com', 'Playbook123!', 'admin')
+
+    // Create playbook
+    const createRes = await app.request('/api/v1/incidents/response-playbooks', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        name: 'High Severity Response',
+        description: 'Response playbook for high severity incidents',
+        trigger_conditions: {
+          severity: ['high', 'critical'],
+        },
+        steps: [
+          { title: 'Assess impact', action: 'manual', estimated_duration_minutes: 10 },
+          { title: 'Notify stakeholders', action: 'automated', automated_action: { type: 'notify', ref: 'slack-alerts' } },
+          { title: 'Execute remediation', action: 'approval', required_role: 'admin' },
+        ],
+        auto_trigger: true,
+      }),
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { success: boolean; data?: { id: string; steps: Array<{ id: string }> } }
+    expect(createData.success).toBe(true)
+    expect(createData.data?.steps.length).toBe(3)
+
+    const playbookId = createData.data?.id
+
+    // Create incident to match
+    const incidentRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Critical system failure',
+        source: 'monitoring',
+        severity: 'critical',
+      }),
+    }, env)
+
+    const incidentData = await incidentRes.json() as { data?: { id: string } }
+    const incidentId = incidentData.data?.id
+
+    // Get matching playbooks
+    const matchRes = await app.request(`/api/v1/incidents/${incidentId}/matching-playbooks`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(matchRes.status).toBe(200)
+    const matchData = await matchRes.json() as { success: boolean; data?: Array<{ id: string }> }
+    expect(matchData.success).toBe(true)
+    expect(matchData.data?.some(p => p.id === playbookId)).toBe(true)
+
+    // Start playbook execution
+    const execRes = await app.request(`/api/v1/incidents/${incidentId}/execute-playbook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ playbook_id: playbookId }),
+    }, env)
+
+    expect(execRes.status).toBe(201)
+    const execData = await execRes.json() as { success: boolean; data?: { id: string; status: string; current_step: number } }
+    expect(execData.success).toBe(true)
+    expect(execData.data?.status).toBe('running')
+
+    const executionId = execData.data?.id
+    const stepId = createData.data?.steps[0].id
+
+    // Complete first step
+    const completeRes = await app.request(`/api/v1/incidents/playbook-executions/${executionId}/steps/${stepId}/complete`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ result: { notes: 'Impact assessed' } }),
+    }, env)
+
+    expect(completeRes.status).toBe(200)
+    const completeData = await completeRes.json() as { success: boolean; data?: { current_step: number } }
+    expect(completeData.data?.current_step).toBe(2)
+  })
+
+  // Custom Fields Tests
+  it('creates and uses custom fields for incidents', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'customfield@example.com', 'CustomField123!', 'admin')
+
+    // Create custom field
+    const fieldRes = await app.request('/api/v1/incidents/custom-fields', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        name: 'Customer Impact',
+        key: 'customer_impact',
+        type: 'select',
+        required: false,
+        options: ['Low', 'Medium', 'High', 'Critical'],
+        description: 'Impact level on customers',
+      }),
+    }, env)
+
+    expect(fieldRes.status).toBe(201)
+    const fieldData = await fieldRes.json() as { success: boolean; data?: { id: string; key: string } }
+    expect(fieldData.success).toBe(true)
+    expect(fieldData.data?.key).toBe('customer_impact')
+
+    const fieldId = fieldData.data?.id
+
+    // Create incident
+    const incidentRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Service degradation',
+        source: 'monitoring',
+        severity: 'high',
+      }),
+    }, env)
+
+    const incidentData = await incidentRes.json() as { data?: { id: string } }
+    const incidentId = incidentData.data?.id
+
+    // Set custom field value
+    const setValueRes = await app.request(`/api/v1/incidents/${incidentId}/custom-fields/${fieldId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ value: 'High' }),
+    }, env)
+
+    expect(setValueRes.status).toBe(200)
+    const setValueData = await setValueRes.json() as { success: boolean; data?: { value: string } }
+    expect(setValueData.success).toBe(true)
+    expect(setValueData.data?.value).toBe('High')
+
+    // Get custom fields
+    const getFieldsRes = await app.request(`/api/v1/incidents/${incidentId}/custom-fields`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(getFieldsRes.status).toBe(200)
+    const getFieldsData = await getFieldsRes.json() as { success: boolean; data?: Array<{ field_id: string; value: string }> }
+    expect(getFieldsData.success).toBe(true)
+    expect(getFieldsData.data?.some(f => f.field_id === fieldId && f.value === 'High')).toBe(true)
+  })
+
+  // War Room Tests
+  it('creates and manages a war room', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'warroom@example.com', 'WarRoom123!', 'admin')
+
+    // Create incident
+    const incidentRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Major outage',
+        source: 'monitoring',
+        severity: 'critical',
+      }),
+    }, env)
+
+    const incidentData = await incidentRes.json() as { data?: { id: string } }
+    const incidentId = incidentData.data?.id
+
+    // Create war room
+    const createRes = await app.request(`/api/v1/incidents/${incidentId}/war-room`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { success: boolean; data?: { id: string; status: string; participants: Array<{ role: string }> } }
+    expect(createData.success).toBe(true)
+    expect(createData.data?.status).toBe('active')
+    expect(createData.data?.participants.length).toBe(1)
+    expect(createData.data?.participants[0].role).toBe('commander')
+
+    // Join war room
+    const joinRes = await app.request(`/api/v1/incidents/${incidentId}/war-room/join`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ role: 'responder' }),
+    }, env)
+
+    expect(joinRes.status).toBe(200)
+
+    // Add message
+    const msgRes = await app.request(`/api/v1/incidents/${incidentId}/war-room/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ message: 'Investigating the root cause' }),
+    }, env)
+
+    expect(msgRes.status).toBe(200)
+    const msgData = await msgRes.json() as { success: boolean; data?: { chat_messages: Array<{ message: string }> } }
+    expect(msgData.data?.chat_messages.some(m => m.message === 'Investigating the root cause')).toBe(true)
+
+    // Add resource
+    const resourceRes = await app.request(`/api/v1/incidents/${incidentId}/war-room/resources`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        type: 'dashboard',
+        title: 'System Dashboard',
+        url: 'https://grafana.example.com/d/system',
+      }),
+    }, env)
+
+    expect(resourceRes.status).toBe(200)
+
+    // Close war room
+    const closeRes = await app.request(`/api/v1/incidents/${incidentId}/war-room/close`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(closeRes.status).toBe(200)
+    const closeData = await closeRes.json() as { success: boolean; data?: { status: string } }
+    expect(closeData.data?.status).toBe('closed')
+  })
+
+  // AI Analysis Tests
+  it('generates AI root cause analysis', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'aianalysis@example.com', 'AIAnalysis123!', 'admin')
+
+    // Create incident
+    const incidentRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Database connection timeout',
+        source: 'monitoring',
+        severity: 'high',
+        evidence: [
+          { type: 'log', source: 'app-logs', content: 'Connection timeout to database after 30s' },
+        ],
+      }),
+    }, env)
+
+    const incidentData = await incidentRes.json() as { data?: { id: string } }
+    const incidentId = incidentData.data?.id
+
+    // Generate AI analysis
+    const analysisRes = await app.request(`/api/v1/incidents/${incidentId}/ai-analysis`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(analysisRes.status).toBe(200)
+    const analysisData = await analysisRes.json() as {
+      success: boolean
+      data?: {
+        incident_id: string
+        summary: string
+        root_causes: Array<{ category: string }>
+        impact_analysis: { business_impact: string }
+      }
+    }
+    expect(analysisData.success).toBe(true)
+    expect(analysisData.data?.incident_id).toBe(incidentId)
+  })
+
+  // Export Tests
+  it('exports incidents to JSON', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'export@example.com', 'Export123!', 'admin')
+
+    // Create some incidents
+    await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Export test incident 1',
+        source: 'test',
+        severity: 'medium',
+      }),
+    }, env)
+
+    await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Export test incident 2',
+        source: 'test',
+        severity: 'low',
+      }),
+    }, env)
+
+    // Request export
+    const exportRes = await app.request('/api/v1/incidents/export', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        format: 'json',
+        include_evidence: true,
+        filters: {
+          source: ['test'],
+        },
+      }),
+    }, env)
+
+    expect(exportRes.status).toBe(201)
+    const exportData = await exportRes.json() as {
+      success: boolean
+      data?: {
+        id: string
+        format: string
+        status: string
+        total_incidents: number
+        download_url?: string
+      }
+    }
+    expect(exportData.success).toBe(true)
+    expect(exportData.data?.format).toBe('json')
+    expect(exportData.data?.total_incidents).toBeGreaterThanOrEqual(1)
+    expect(exportData.data?.download_url).toBeDefined()
+  })
+
+  // Incident Review Tests
+  it('creates and completes incident reviews', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'review@example.com', 'Review123!', 'admin')
+
+    // Create incident
+    const incidentRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Review test incident',
+        source: 'test',
+        severity: 'high',
+      }),
+    }, env)
+
+    const incidentData = await incidentRes.json() as { data?: { id: string } }
+    const incidentId = incidentData.data?.id
+
+    // Create review
+    const createRes = await app.request(`/api/v1/incidents/${incidentId}/reviews`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        scheduled_at: new Date(Date.now() + 86400000).toISOString(),
+        review_type: 'post_resolution',
+        agenda: ['Review timeline', 'Identify improvements'],
+      }),
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { success: boolean; data?: { id: string; agenda: string[] } }
+    expect(createData.success).toBe(true)
+    expect(createData.data?.agenda.length).toBe(2)
+
+    const reviewId = createData.data?.id
+
+    // Complete review
+    const completeRes = await app.request(`/api/v1/incidents/${incidentId}/reviews/${reviewId}/complete`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        notes: 'Review completed successfully',
+        action_items: [
+          { description: 'Update runbook for this scenario', owner_id: 1 },
+        ],
+      }),
+    }, env)
+
+    expect(completeRes.status).toBe(200)
+    const completeData = await completeRes.json() as { success: boolean; data?: { status: string; action_items: Array<{ description: string }> } }
+    expect(completeData.success).toBe(true)
+    expect(completeData.data?.status).toBe('completed')
+    expect(completeData.data?.action_items.length).toBe(1)
+  })
+
+  // Incident Feedback Tests
+  it('submits and retrieves incident feedback', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'feedback@example.com', 'Feedback123!', 'admin')
+
+    // Create incident
+    const incidentRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Feedback test incident',
+        source: 'test',
+        severity: 'medium',
+      }),
+    }, env)
+
+    const incidentData = await incidentRes.json() as { data?: { id: string } }
+    const incidentId = incidentData.data?.id
+
+    // Submit feedback
+    const submitRes = await app.request(`/api/v1/incidents/${incidentId}/feedback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        ratings: {
+          overall_satisfaction: 4,
+          response_speed: 5,
+          communication: 4,
+          resolution_quality: 4,
+        },
+        strengths: ['Fast response', 'Clear communication'],
+        improvements: ['More frequent updates'],
+        would_recommend: true,
+      }),
+    }, env)
+
+    expect(submitRes.status).toBe(201)
+    const submitData = await submitRes.json() as { success: boolean; data?: { ratings: { overall_satisfaction: number } } }
+    expect(submitData.success).toBe(true)
+    expect(submitData.data?.ratings.overall_satisfaction).toBe(4)
+
+    // Get feedback
+    const getRes = await app.request(`/api/v1/incidents/${incidentId}/feedback`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(getRes.status).toBe(200)
+    const getData = await getRes.json() as { success: boolean; data?: { would_recommend: boolean } }
+    expect(getData.success).toBe(true)
+    expect(getData.data?.would_recommend).toBe(true)
+  })
+
+  // Incident Cost Tests
+  it('calculates and retrieves incident costs', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'cost@example.com', 'Cost123!', 'admin')
+
+    // Create incident
+    const incidentRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Cost test incident',
+        source: 'test',
+        severity: 'high',
+      }),
+    }, env)
+
+    const incidentData = await incidentRes.json() as { data?: { id: string } }
+    const incidentId = incidentData.data?.id
+
+    // Calculate cost
+    const calcRes = await app.request(`/api/v1/incidents/${incidentId}/cost`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        labor_hours: 8,
+        labor_rate_usd: 150,
+        infrastructure_cost_usd: 200,
+        revenue_impact_usd: 1000,
+      }),
+    }, env)
+
+    expect(calcRes.status).toBe(201)
+    const calcData = await calcRes.json() as { success: boolean; data?: { estimated_cost_usd: number; cost_breakdown: { labor_cost_usd: number } } }
+    expect(calcData.success).toBe(true)
+    expect(calcData.data?.estimated_cost_usd).toBe(2400) // 1200 labor + 200 infra + 1000 revenue
+    expect(calcData.data?.cost_breakdown.labor_cost_usd).toBe(1200)
+
+    // Get cost
+    const getRes = await app.request(`/api/v1/incidents/${incidentId}/cost`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(getRes.status).toBe(200)
+  })
+
+  // On-Call Schedule Tests
+  it('creates and retrieves on-call schedules', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'oncall@example.com', 'OnCall123!', 'admin')
+
+    // Create schedule
+    const createRes = await app.request('/api/v1/incidents/oncall/schedules', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        name: 'Primary On-Call',
+        description: 'Primary on-call rotation',
+        rotation_type: 'weekly',
+        rotation_config: {
+          start_date: new Date().toISOString(),
+          members: [
+            { user_id: 1, email: 'oncall1@example.com', order: 1 },
+            { user_id: 2, email: 'oncall2@example.com', order: 2 },
+          ],
+          handoff_time: '09:00',
+        },
+        timezone: 'UTC',
+      }),
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { success: boolean; data?: { id: string; rotation_type: string } }
+    expect(createData.success).toBe(true)
+    expect(createData.data?.rotation_type).toBe('weekly')
+
+    const scheduleId = createData.data?.id
+
+    // Get schedule
+    const getRes = await app.request(`/api/v1/incidents/oncall/schedules/${scheduleId}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(getRes.status).toBe(200)
+
+    // Get current on-call
+    const currentRes = await app.request(`/api/v1/incidents/oncall/schedules/${scheduleId}/current`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(currentRes.status).toBe(200)
+    const currentData = await currentRes.json() as { success: boolean; data?: { is_override: boolean } }
+    expect(currentData.success).toBe(true)
+  })
+
+  // Checklist Tests
+  it('creates and updates incident checklists', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'checklist@example.com', 'Checklist123!', 'admin')
+
+    // Create incident
+    const incidentRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Checklist test incident',
+        source: 'test',
+        severity: 'high',
+      }),
+    }, env)
+
+    const incidentData = await incidentRes.json() as { data?: { id: string } }
+    const incidentId = incidentData.data?.id
+
+    // Create checklist
+    const createRes = await app.request(`/api/v1/incidents/${incidentId}/checklists`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        name: 'Response Checklist',
+        items: ['Acknowledge incident', 'Assess impact', 'Notify stakeholders', 'Begin remediation'],
+      }),
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { success: boolean; data?: { id: string; items: Array<{ id: string; checked: boolean }> } }
+    expect(createData.success).toBe(true)
+    expect(createData.data?.items.length).toBe(4)
+
+    const checklistId = createData.data?.id
+    const itemId = createData.data?.items[0].id
+
+    // Update checklist item
+    const updateRes = await app.request(`/api/v1/incidents/${incidentId}/checklists/${checklistId}/items/${itemId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ checked: true }),
+    }, env)
+
+    expect(updateRes.status).toBe(200)
+    const updateData = await updateRes.json() as { success: boolean; data?: { items: Array<{ id: string; checked: boolean }> } }
+    expect(updateData.success).toBe(true)
+    expect(updateData.data?.items.find(i => i.id === itemId)?.checked).toBe(true)
+  })
+
+  // Change Link Tests
+  it('links incidents to changes', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'changelink@example.com', 'ChangeLink123!', 'admin')
+
+    // Create incident
+    const incidentRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Change link test incident',
+        source: 'deployment',
+        severity: 'high',
+      }),
+    }, env)
+
+    const incidentData = await incidentRes.json() as { data?: { id: string } }
+    const incidentId = incidentData.data?.id
+
+    // Link to change
+    const linkRes = await app.request(`/api/v1/incidents/${incidentId}/changes`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        change_id: 'deploy-2024-001',
+        change_type: 'deployment',
+        change_description: 'Deployed version 2.1.0',
+        change_url: 'https://github.com/example/repo/deployments/1',
+        change_timestamp: new Date().toISOString(),
+        relationship: 'caused',
+      }),
+    }, env)
+
+    expect(linkRes.status).toBe(201)
+    const linkData = await linkRes.json() as { success: boolean; data?: { change_id: string; relationship: string } }
+    expect(linkData.success).toBe(true)
+    expect(linkData.data?.change_id).toBe('deploy-2024-001')
+
+    // Get changes
+    const listRes = await app.request(`/api/v1/incidents/${incidentId}/changes`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(listRes.status).toBe(200)
+    const listData = await listRes.json() as { success: boolean; data?: Array<{ change_id: string }> }
+    expect(listData.success).toBe(true)
+    expect(listData.data?.length).toBe(1)
+  })
+
+  // Compliance Tests
+  it('creates and updates compliance records', async () => {
+    const env = createEnv()
+    const authToken = await registerAndLogin(env, 'compliance@example.com', 'Compliance123!', 'admin')
+
+    // Create incident
+    const incidentRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Compliance test incident',
+        source: 'security',
+        severity: 'critical',
+      }),
+    }, env)
+
+    const incidentData = await incidentRes.json() as { data?: { id: string } }
+    const incidentId = incidentData.data?.id
+
+    // Create compliance record
+    const createRes = await app.request(`/api/v1/incidents/${incidentId}/compliance`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        framework: 'soc2',
+        requirements: [
+          { requirement_id: 'CC6.1', description: 'Incident response procedures' },
+          { requirement_id: 'CC6.6', description: 'Security incident logging' },
+        ],
+      }),
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { success: boolean; data?: { framework: string; requirements: Array<{ requirement_id: string }> } }
+    expect(createData.success).toBe(true)
+    expect(createData.data?.framework).toBe('soc2')
+
+    // Update requirement
+    const updateRes = await app.request(`/api/v1/incidents/${incidentId}/compliance/CC6.1`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        status: 'compliant',
+        evidence: 'Runbook followed, timeline documented',
+      }),
+    }, env)
+
+    expect(updateRes.status).toBe(200)
+    const updateData = await updateRes.json() as { success: boolean; data?: { requirements: Array<{ requirement_id: string; status: string }> } }
+    expect(updateData.success).toBe(true)
+    expect(updateData.data?.requirements.find(r => r.requirement_id === 'CC6.1')?.status).toBe('compliant')
+  })
 })
