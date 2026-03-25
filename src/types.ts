@@ -269,6 +269,9 @@ export interface IncidentDetail extends IncidentSummary {
   escalated_from?: string
   escalated_at?: string
   sla_deadline?: string
+  assignee_id?: number
+  assignee_email?: string
+  assigned_at?: string
 }
 
 export interface IncidentRecord {
@@ -298,6 +301,9 @@ export interface IncidentRecord {
   escalated_from?: string
   escalated_at?: string
   sla_deadline?: string
+  assignee_id?: number
+  assignee_email?: string
+  assigned_at?: string
   created_at: string
   updated_at: string
 }
@@ -306,6 +312,7 @@ export type IncidentTimelineEventType =
   | 'created'
   | 'acknowledged'
   | 'escalated'
+  | 'assigned'
   | 'analyzed'
   | 'approved'
   | 'executing'
@@ -402,6 +409,7 @@ export type WebhookEventType =
   | 'incident.created'
   | 'incident.acknowledged'
   | 'incident.escalated'
+  | 'incident.assigned'
   | 'incident.analyzed'
   | 'incident.approved'
   | 'incident.executing'

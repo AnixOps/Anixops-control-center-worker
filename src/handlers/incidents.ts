@@ -8,6 +8,7 @@ import {
   acknowledgeIncident,
   analyzeIncident,
   approveIncident,
+  assignIncident,
   bulkAnalyzeIncidents,
   bulkApproveIncidents,
   bulkDeleteIncidents,
@@ -31,6 +32,7 @@ import {
   setIncidentTags,
   toIncidentDetail,
   toIncidentSummary,
+  unassignIncident,
   updateIncidentComment,
 } from '../services/incidents'
 
@@ -245,6 +247,54 @@ export async function escalateIncidentHandler(c: Context<{ Bindings: Env }>) {
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Escalation failed' }, 400)
   }
+}
+
+const assignSchema = z.object({
+  assignee_id: z.number().int().positive(),
+  assignee_email: z.string().email().optional(),
+})
+
+export async function assignIncidentHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  try {
+    const body = assignSchema.parse(await c.req.json())
+    const updated = await assignIncident(c.env, incident, body.assignee_id, body.assignee_email)
+
+    await logAudit(c, principal.sub, 'assign_incident', 'incident', {
+      incident_id: updated.id,
+      assignee_id: body.assignee_id,
+      assignee_email: body.assignee_email,
+      assigned_at: updated.assigned_at,
+    })
+
+    return c.json({ success: true, data: toIncidentDetail(updated) })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Assignment failed' }, 400)
+  }
+}
+
+export async function unassignIncidentHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  const updated = await unassignIncident(c.env, incident)
+
+  await logAudit(c, principal.sub, 'unassign_incident', 'incident', {
+    incident_id: updated.id,
+  })
+
+  return c.json({ success: true, data: toIncidentDetail(updated) })
 }
 
 export async function getIncidentSlaStatusHandler(c: Context<{ Bindings: Env }>) {

@@ -1831,3 +1831,54 @@ export async function getIncidentSlaStatus(
 
   return result
 }
+
+export async function assignIncident(
+  env: Env,
+  incident: IncidentRecord,
+  assigneeId: number,
+  assigneeEmail?: string
+): Promise<IncidentRecord> {
+  const now = nowIso()
+  const updated: IncidentRecord = {
+    ...incident,
+    assignee_id: assigneeId,
+    assignee_email: assigneeEmail,
+    assigned_at: now,
+    updated_at: now,
+  }
+
+  await storeIncident(env, updated)
+
+  await publishIncidentEvent(env, updated, 'incident.assigned')
+
+  return updated
+}
+
+export async function unassignIncident(
+  env: Env,
+  incident: IncidentRecord
+): Promise<IncidentRecord> {
+  const now = nowIso()
+  const updated: IncidentRecord = {
+    ...incident,
+    assignee_id: undefined,
+    assignee_email: undefined,
+    assigned_at: undefined,
+    updated_at: now,
+  }
+
+  await storeIncident(env, updated)
+
+  return updated
+}
+
+export async function listAssignedIncidents(
+  env: Env,
+  assigneeId: number
+): Promise<IncidentRecord[]> {
+  const ids = await getIncidentIndex(env)
+  const incidents = await Promise.all(ids.map(id => getIncident(env, id)))
+  return incidents.filter((i): i is IncidentRecord =>
+    i !== null && i.assignee_id === assigneeId && !['resolved', 'failed'].includes(i.status)
+  )
+}
