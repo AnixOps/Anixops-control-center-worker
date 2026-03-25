@@ -539,6 +539,102 @@ export interface IncidentReport {
   mttr_by_severity: Record<IncidentSeverity, number>
 }
 
+// Incident Template types
+export interface IncidentTemplate {
+  id: string
+  name: string
+  description?: string
+  category?: string
+  title_template: string
+  summary_template?: string
+  default_severity: IncidentSeverity
+  default_source: string
+  default_action_type?: IncidentActionType
+  default_action_ref?: string
+  default_tags: string[]
+  evidence_templates: Array<{
+    type: IncidentEvidence['type']
+    source_template: string
+    content_template?: string
+  }>
+  created_by: number
+  created_at: string
+  updated_at: string
+}
+
+// Automation Rule types
+export type AutomationTrigger =
+  | 'incident.created'
+  | 'incident.acknowledged'
+  | 'incident.escalated'
+  | 'incident.analyzed'
+  | 'incident.approved'
+  | 'incident.resolved'
+  | 'incident.failed'
+  | 'sla_breach'
+  | 'duplicate_detected'
+
+export type AutomationAction =
+  | { type: 'assign'; assignee_id: number }
+  | { type: 'escalate'; target_severity: IncidentSeverity }
+  | { type: 'add_tags'; tags: string[] }
+  | { type: 'notify'; channels: string[]; recipients: string[] }
+  | { type: 'execute_runbook'; playbook_id: number }
+  | { type: 'set_sla'; minutes: number }
+  | { type: 'add_comment'; content: string }
+
+export interface AutomationRule {
+  id: string
+  name: string
+  description?: string
+  enabled: boolean
+  trigger: AutomationTrigger
+  conditions: {
+    severity?: IncidentSeverity[]
+    source?: string[]
+    action_type?: IncidentActionType[]
+    tags?: string[]
+    time_range?: { start_hour: number; end_hour: number }
+  }
+  actions: AutomationAction[]
+  priority: number
+  created_by: number
+  created_at: string
+  updated_at: string
+}
+
+// Post-mortem types
+export interface IncidentPostMortem {
+  id: string
+  incident_id: string
+  title: string
+  summary: string
+  timeline: Array<{
+    timestamp: string
+    event: string
+    details?: string
+  }>
+  root_cause: string
+  contributing_factors: string[]
+  impact: {
+    users_affected?: number
+    duration_minutes: number
+    services_affected: string[]
+  }
+  resolution: string
+  lessons_learned: string[]
+  action_items: Array<{
+    id: string
+    description: string
+    owner?: string
+    status: 'open' | 'in_progress' | 'completed'
+    due_date?: string
+  }>
+  created_by: number
+  created_at: string
+  updated_at: string
+}
+
 // Realtime event types
 export type RealtimeScope = 'global' | 'tenant' | 'user' | 'node' | 'task' | 'audit' | 'incident' | 'system'
 

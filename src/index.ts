@@ -63,6 +63,20 @@ import {
   getIncidentActivityLogHandler,
   getRunbookSuggestionsHandler,
   executeRunbookHandler,
+  listTemplatesHandler,
+  getTemplateHandler,
+  createTemplateHandler,
+  updateTemplateHandler,
+  deleteTemplateHandler,
+  createFromTemplateHandler,
+  listAutomationRulesHandler,
+  createAutomationRuleHandler,
+  deleteAutomationRuleHandler,
+  toggleAutomationRuleHandler,
+  getPostMortemHandler,
+  createPostMortemHandler,
+  updatePostMortemHandler,
+  updateActionItemHandler,
 } from './handlers/incidents'
 import {
   listPoliciesHandler,
@@ -398,6 +412,26 @@ app.get('/api/v1/incidents/notification-rules', authMiddleware, rbacMiddleware([
 app.post('/api/v1/incidents/notification-rules', authMiddleware, rbacMiddleware(['admin']), createNotificationRuleHandler)
 app.delete('/api/v1/incidents/notification-rules/:ruleId', authMiddleware, rbacMiddleware(['admin']), deleteNotificationRuleHandler)
 app.patch('/api/v1/incidents/notification-rules/:ruleId', authMiddleware, rbacMiddleware(['admin']), toggleNotificationRuleHandler)
+
+// Incident templates
+app.get('/api/v1/incidents/templates', authMiddleware, rbacMiddleware(['admin', 'operator']), listTemplatesHandler)
+app.get('/api/v1/incidents/templates/:templateId', authMiddleware, rbacMiddleware(['admin', 'operator']), getTemplateHandler)
+app.post('/api/v1/incidents/templates', authMiddleware, rbacMiddleware(['admin']), createTemplateHandler)
+app.put('/api/v1/incidents/templates/:templateId', authMiddleware, rbacMiddleware(['admin']), updateTemplateHandler)
+app.delete('/api/v1/incidents/templates/:templateId', authMiddleware, rbacMiddleware(['admin']), deleteTemplateHandler)
+app.post('/api/v1/incidents/templates/:templateId/create', authMiddleware, rbacMiddleware(['admin', 'operator']), createFromTemplateHandler)
+
+// Incident automation rules
+app.get('/api/v1/incidents/automation-rules', authMiddleware, rbacMiddleware(['admin']), listAutomationRulesHandler)
+app.post('/api/v1/incidents/automation-rules', authMiddleware, rbacMiddleware(['admin']), createAutomationRuleHandler)
+app.delete('/api/v1/incidents/automation-rules/:ruleId', authMiddleware, rbacMiddleware(['admin']), deleteAutomationRuleHandler)
+app.patch('/api/v1/incidents/automation-rules/:ruleId', authMiddleware, rbacMiddleware(['admin']), toggleAutomationRuleHandler)
+
+// Incident post-mortems
+app.get('/api/v1/incidents/:id/postmortem', authMiddleware, rbacMiddleware(['admin', 'operator']), getPostMortemHandler)
+app.post('/api/v1/incidents/:id/postmortem', authMiddleware, rbacMiddleware(['admin', 'operator']), createPostMortemHandler)
+app.put('/api/v1/incidents/:id/postmortem', authMiddleware, rbacMiddleware(['admin', 'operator']), updatePostMortemHandler)
+app.patch('/api/v1/incidents/:id/postmortem/action-items/:actionItemId', authMiddleware, rbacMiddleware(['admin', 'operator']), updateActionItemHandler)
 
 // Governance policies
 app.get('/api/v1/governance/policies', authMiddleware, rbacMiddleware(['admin']), listPoliciesHandler)

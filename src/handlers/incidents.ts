@@ -18,10 +18,16 @@ import {
   buildIncidentTimeline,
   canApproveIncident,
   canExecuteIncident,
+  createAutomationRule,
   createIncident,
+  createIncidentFromTemplate,
+  createIncidentTemplate,
   createNotificationRule,
+  createPostMortem,
   createSuppressionRule,
+  deleteAutomationRule,
   deleteIncidentComment,
+  deleteIncidentTemplate,
   deleteNotificationRule,
   deleteSuppressionRule,
   escalateIncident,
@@ -33,9 +39,13 @@ import {
   getIncidentComment,
   getIncidentSlaStatus,
   getIncidentStatistics,
+  getIncidentTemplate,
+  getPostMortem,
   listAllTags,
   listAssignedIncidents,
+  listAutomationRules,
   listIncidentComments,
+  listIncidentTemplates,
   listIncidents,
   listNotificationRules,
   listSuppressionRules,
@@ -45,12 +55,16 @@ import {
   searchIncidents,
   setIncidentTags,
   suggestRunbooks,
+  toggleAutomationRule,
   toggleNotificationRule,
   toggleSuppressionRule,
   toIncidentDetail,
   toIncidentSummary,
   unassignIncident,
+  updateActionItemStatus,
   updateIncidentComment,
+  updateIncidentTemplate,
+  updatePostMortem,
 } from '../services/incidents'
 
 const createIncidentSchema = z.object({
@@ -1059,6 +1073,370 @@ export async function executeRunbookHandler(c: Context<{ Bindings: Env }>) {
     })
 
     return c.json({ success: true, data: result })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+// ==================== Templates ====================
+
+const createTemplateSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
+  category: z.string().max(50).optional(),
+  title_template: z.string().min(1).max(200),
+  summary_template: z.string().max(1000).optional(),
+  default_severity: z.enum(['low', 'medium', 'high', 'critical']),
+  default_source: z.string().min(1),
+  default_action_type: z.enum(['scale_policy', 'restart_deployment', 'scale_deployment']).optional(),
+  default_action_ref: z.string().optional(),
+  default_tags: z.array(z.string().max(50)).default([]),
+  evidence_templates: z.array(z.object({
+    type: z.enum(['log', 'metric', 'task', 'node', 'alert', 'service', 'manual']),
+    source_template: z.string(),
+    content_template: z.string().optional(),
+  })).default([]),
+})
+
+export async function listTemplatesHandler(c: Context<{ Bindings: Env }>) {
+  const templates = await listIncidentTemplates(c.env)
+  return c.json({ success: true, data: templates })
+}
+
+export async function getTemplateHandler(c: Context<{ Bindings: Env }>) {
+  const templateId = c.req.param('templateId') as string
+  const template = await getIncidentTemplate(c.env, templateId)
+
+  if (!template) {
+    return c.json({ success: false, error: 'Template not found' }, 404)
+  }
+
+  return c.json({ success: true, data: template })
+}
+
+export async function createTemplateHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  try {
+    const body = createTemplateSchema.parse(await c.req.json())
+    const template = await createIncidentTemplate(c.env, principal, {
+      name: body.name,
+      description: body.description,
+      category: body.category,
+      title_template: body.title_template,
+      summary_template: body.summary_template,
+      default_severity: body.default_severity,
+      default_source: body.default_source,
+      default_action_type: body.default_action_type,
+      default_action_ref: body.default_action_ref,
+      default_tags: body.default_tags,
+      evidence_templates: body.evidence_templates,
+    })
+
+    await logAudit(c, principal.sub, 'create_incident_template', 'incident', {
+      template_id: template.id,
+      template_name: template.name,
+    })
+
+    return c.json({ success: true, data: template }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function updateTemplateHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const templateId = c.req.param('templateId') as string
+
+  try {
+    const body = createTemplateSchema.partial().parse(await c.req.json())
+    const template = await updateIncidentTemplate(c.env, templateId, body)
+
+    if (!template) {
+      return c.json({ success: false, error: 'Template not found' }, 404)
+    }
+
+    await logAudit(c, principal.sub, 'update_incident_template', 'incident', {
+      template_id: templateId,
+    })
+
+    return c.json({ success: true, data: template })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function deleteTemplateHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const templateId = c.req.param('templateId') as string
+
+  const deleted = await deleteIncidentTemplate(c.env, templateId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Template not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_incident_template', 'incident', {
+    template_id: templateId,
+  })
+
+  return c.json({ success: true })
+}
+
+export async function createFromTemplateHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const templateId = c.req.param('templateId') as string
+
+  try {
+    const body = z.object({ variables: z.record(z.string()).optional() }).parse(await c.req.json())
+    const incident = await createIncidentFromTemplate(c.env, principal, templateId, body.variables || {})
+
+    await logAudit(c, principal.sub, 'create_incident_from_template', 'incident', {
+      template_id: templateId,
+      incident_id: incident.id,
+    })
+
+    return c.json({ success: true, data: toIncidentDetail(incident) }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create incident' }, 400)
+  }
+}
+
+// ==================== Automation Rules ====================
+
+const createActionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('assign'), assignee_id: z.number().int().positive() }),
+  z.object({ type: z.literal('escalate'), target_severity: z.enum(['low', 'medium', 'high', 'critical']) }),
+  z.object({ type: z.literal('add_tags'), tags: z.array(z.string()).min(1) }),
+  z.object({ type: z.literal('notify'), channels: z.array(z.string()).min(1), recipients: z.array(z.string()).min(1) }),
+  z.object({ type: z.literal('execute_runbook'), playbook_id: z.number().int().positive() }),
+  z.object({ type: z.literal('set_sla'), minutes: z.number().int().min(1).max(10080) }),
+  z.object({ type: z.literal('add_comment'), content: z.string().min(1).max(5000) }),
+])
+
+const createAutomationRuleSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
+  enabled: z.boolean().default(true),
+  trigger: z.enum(['incident.created', 'incident.acknowledged', 'incident.escalated', 'incident.analyzed', 'incident.approved', 'incident.resolved', 'incident.failed', 'sla_breach', 'duplicate_detected']),
+  conditions: z.object({
+    severity: z.array(z.enum(['low', 'medium', 'high', 'critical'])).optional(),
+    source: z.array(z.string()).optional(),
+    action_type: z.array(z.enum(['scale_policy', 'restart_deployment', 'scale_deployment'])).optional(),
+    tags: z.array(z.string()).optional(),
+    time_range: z.object({ start_hour: z.number().min(0).max(23), end_hour: z.number().min(1).max(24) }).optional(),
+  }),
+  actions: z.array(createActionSchema).min(1),
+  priority: z.number().int().min(1).max(100).default(50),
+})
+
+export async function listAutomationRulesHandler(c: Context<{ Bindings: Env }>) {
+  const rules = await listAutomationRules(c.env)
+  return c.json({ success: true, data: rules })
+}
+
+export async function createAutomationRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  try {
+    const body = createAutomationRuleSchema.parse(await c.req.json())
+    const rule = await createAutomationRule(c.env, principal, {
+      name: body.name,
+      description: body.description,
+      enabled: body.enabled,
+      trigger: body.trigger,
+      conditions: body.conditions,
+      actions: body.actions as import('../types').AutomationAction[],
+      priority: body.priority,
+    })
+
+    await logAudit(c, principal.sub, 'create_automation_rule', 'incident', {
+      rule_id: rule.id,
+      rule_name: rule.name,
+      trigger: rule.trigger,
+    })
+
+    return c.json({ success: true, data: rule }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function deleteAutomationRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const ruleId = c.req.param('ruleId') as string
+
+  const deleted = await deleteAutomationRule(c.env, ruleId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Automation rule not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_automation_rule', 'incident', {
+    rule_id: ruleId,
+  })
+
+  return c.json({ success: true })
+}
+
+export async function toggleAutomationRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const ruleId = c.req.param('ruleId') as string
+
+  try {
+    const body = z.object({ enabled: z.boolean() }).parse(await c.req.json())
+    const rule = await toggleAutomationRule(c.env, ruleId, body.enabled)
+
+    if (!rule) {
+      return c.json({ success: false, error: 'Automation rule not found' }, 404)
+    }
+
+    await logAudit(c, principal.sub, 'toggle_automation_rule', 'incident', {
+      rule_id: ruleId,
+      enabled: body.enabled,
+    })
+
+    return c.json({ success: true, data: rule })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+// ==================== Post-Mortems ====================
+
+const createPostMortemSchema = z.object({
+  title: z.string().min(1).max(200),
+  summary: z.string().min(1).max(5000),
+  timeline: z.array(z.object({
+    timestamp: z.string(),
+    event: z.string(),
+    details: z.string().optional(),
+  })),
+  root_cause: z.string().min(1).max(5000),
+  contributing_factors: z.array(z.string()),
+  impact: z.object({
+    users_affected: z.number().int().optional(),
+    duration_minutes: z.number().int().min(1),
+    services_affected: z.array(z.string()),
+  }),
+  resolution: z.string().min(1).max(5000),
+  lessons_learned: z.array(z.string()),
+  action_items: z.array(z.object({
+    id: z.string(),
+    description: z.string(),
+    owner: z.string().optional(),
+    status: z.enum(['open', 'in_progress', 'completed']),
+    due_date: z.string().optional(),
+  })),
+})
+
+export async function getPostMortemHandler(c: Context<{ Bindings: Env }>) {
+  const incidentId = c.req.param('id') as string
+  const postMortem = await getPostMortem(c.env, incidentId)
+
+  if (!postMortem) {
+    return c.json({ success: false, error: 'Post-mortem not found' }, 404)
+  }
+
+  return c.json({ success: true, data: postMortem })
+}
+
+export async function createPostMortemHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  try {
+    const body = createPostMortemSchema.parse(await c.req.json())
+    const postMortem = await createPostMortem(c.env, principal, incidentId, {
+      title: body.title,
+      summary: body.summary,
+      timeline: body.timeline,
+      root_cause: body.root_cause,
+      contributing_factors: body.contributing_factors,
+      impact: body.impact,
+      resolution: body.resolution,
+      lessons_learned: body.lessons_learned,
+      action_items: body.action_items,
+    })
+
+    await logAudit(c, principal.sub, 'create_postmortem', 'incident', {
+      incident_id: incidentId,
+      postmortem_id: postMortem.id,
+      title: postMortem.title,
+    })
+
+    return c.json({ success: true, data: postMortem }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create post-mortem' }, 400)
+  }
+}
+
+export async function updatePostMortemHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+
+  try {
+    const body = createPostMortemSchema.partial().parse(await c.req.json())
+    const postMortem = await updatePostMortem(c.env, incidentId, body)
+
+    if (!postMortem) {
+      return c.json({ success: false, error: 'Post-mortem not found' }, 404)
+    }
+
+    await logAudit(c, principal.sub, 'update_postmortem', 'incident', {
+      incident_id: incidentId,
+    })
+
+    return c.json({ success: true, data: postMortem })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function updateActionItemHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incidentId = c.req.param('id') as string
+  const actionItemId = c.req.param('actionItemId') as string
+
+  try {
+    const body = z.object({ status: z.enum(['open', 'in_progress', 'completed']) }).parse(await c.req.json())
+    const postMortem = await updateActionItemStatus(c.env, incidentId, actionItemId, body.status)
+
+    if (!postMortem) {
+      return c.json({ success: false, error: 'Post-mortem or action item not found' }, 404)
+    }
+
+    await logAudit(c, principal.sub, 'update_action_item', 'incident', {
+      incident_id: incidentId,
+      action_item_id: actionItemId,
+      status: body.status,
+    })
+
+    return c.json({ success: true, data: postMortem })
   } catch (err) {
     if (err instanceof z.ZodError) {
       return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)

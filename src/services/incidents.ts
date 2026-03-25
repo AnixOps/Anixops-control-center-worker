@@ -2761,3 +2761,372 @@ export async function executeRunbookForIncident(
     status: 'pending',
   }
 }
+
+// ==================== Incident Templates ====================
+
+const TEMPLATES_KEY = `${INCIDENT_PREFIX}templates`
+
+async function getTemplates(env: Env): Promise<import('../types').IncidentTemplate[]> {
+  const templates = await env.KV.get(TEMPLATES_KEY, 'json')
+  return (templates as import('../types').IncidentTemplate[] | null) || []
+}
+
+async function setTemplates(env: Env, templates: import('../types').IncidentTemplate[]): Promise<void> {
+  await env.KV.put(TEMPLATES_KEY, JSON.stringify(templates), { expirationTtl: 86400 * 30 })
+}
+
+export async function createIncidentTemplate(
+  env: Env,
+  principal: AuthPrincipal,
+  input: Omit<import('../types').IncidentTemplate, 'id' | 'created_by' | 'created_at' | 'updated_at'>
+): Promise<import('../types').IncidentTemplate> {
+  const now = nowIso()
+  const template: import('../types').IncidentTemplate = {
+    ...input,
+    id: crypto.randomUUID(),
+    created_by: principal.sub,
+    created_at: now,
+    updated_at: now,
+  }
+
+  const templates = await getTemplates(env)
+  templates.push(template)
+  await setTemplates(env, templates)
+
+  return template
+}
+
+export async function listIncidentTemplates(env: Env): Promise<import('../types').IncidentTemplate[]> {
+  return getTemplates(env)
+}
+
+export async function getIncidentTemplate(env: Env, id: string): Promise<import('../types').IncidentTemplate | null> {
+  const templates = await getTemplates(env)
+  return templates.find(t => t.id === id) || null
+}
+
+export async function updateIncidentTemplate(
+  env: Env,
+  id: string,
+  updates: Partial<Omit<import('../types').IncidentTemplate, 'id' | 'created_by' | 'created_at'>>
+): Promise<import('../types').IncidentTemplate | null> {
+  const templates = await getTemplates(env)
+  const index = templates.findIndex(t => t.id === id)
+  if (index === -1) return null
+
+  templates[index] = {
+    ...templates[index],
+    ...updates,
+    updated_at: nowIso(),
+  }
+
+  await setTemplates(env, templates)
+  return templates[index]
+}
+
+export async function deleteIncidentTemplate(env: Env, id: string): Promise<boolean> {
+  const templates = await getTemplates(env)
+  const index = templates.findIndex(t => t.id === id)
+  if (index === -1) return false
+
+  templates.splice(index, 1)
+  await setTemplates(env, templates)
+  return true
+}
+
+export async function createIncidentFromTemplate(
+  env: Env,
+  principal: AuthPrincipal,
+  templateId: string,
+  variables: Record<string, string> = {}
+): Promise<IncidentRecord> {
+  const template = await getIncidentTemplate(env, templateId)
+  if (!template) {
+    throw new Error('Template not found')
+  }
+
+  // Replace variables in templates
+  let title = template.title_template
+  let summary = template.summary_template || ''
+
+  for (const [key, value] of Object.entries(variables)) {
+    const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g')
+    title = title.replace(regex, value)
+    summary = summary.replace(regex, value)
+  }
+
+  const input: CreateIncidentInput = {
+    title,
+    summary,
+    severity: template.default_severity,
+    source: template.default_source,
+    action_type: template.default_action_type,
+    action_ref: template.default_action_ref,
+    tags: template.default_tags,
+    evidence: [],
+  }
+
+  return createIncident(env, principal, input)
+}
+
+// ==================== Automation Rules ====================
+
+const AUTOMATION_RULES_KEY = `${INCIDENT_PREFIX}automation_rules`
+
+async function getAutomationRules(env: Env): Promise<import('../types').AutomationRule[]> {
+  const rules = await env.KV.get(AUTOMATION_RULES_KEY, 'json')
+  return (rules as import('../types').AutomationRule[] | null) || []
+}
+
+async function setAutomationRules(env: Env, rules: import('../types').AutomationRule[]): Promise<void> {
+  await env.KV.put(AUTOMATION_RULES_KEY, JSON.stringify(rules), { expirationTtl: 86400 * 30 })
+}
+
+export async function createAutomationRule(
+  env: Env,
+  principal: AuthPrincipal,
+  input: Omit<import('../types').AutomationRule, 'id' | 'created_by' | 'created_at' | 'updated_at'>
+): Promise<import('../types').AutomationRule> {
+  const now = nowIso()
+  const rule: import('../types').AutomationRule = {
+    ...input,
+    id: crypto.randomUUID(),
+    created_by: principal.sub,
+    created_at: now,
+    updated_at: now,
+  }
+
+  const rules = await getAutomationRules(env)
+  rules.push(rule)
+  rules.sort((a, b) => b.priority - a.priority)
+  await setAutomationRules(env, rules)
+
+  return rule
+}
+
+export async function listAutomationRules(env: Env): Promise<import('../types').AutomationRule[]> {
+  return getAutomationRules(env)
+}
+
+export async function deleteAutomationRule(env: Env, id: string): Promise<boolean> {
+  const rules = await getAutomationRules(env)
+  const index = rules.findIndex(r => r.id === id)
+  if (index === -1) return false
+
+  rules.splice(index, 1)
+  await setAutomationRules(env, rules)
+  return true
+}
+
+export async function toggleAutomationRule(env: Env, id: string, enabled: boolean): Promise<import('../types').AutomationRule | null> {
+  const rules = await getAutomationRules(env)
+  const rule = rules.find(r => r.id === id)
+  if (!rule) return null
+
+  rule.enabled = enabled
+  rule.updated_at = nowIso()
+
+  await setAutomationRules(env, rules)
+  return rule
+}
+
+function matchesAutomationConditions(
+  incident: IncidentRecord,
+  conditions: import('../types').AutomationRule['conditions']
+): boolean {
+  if (conditions.severity?.length && !conditions.severity.includes(incident.severity)) {
+    return false
+  }
+
+  if (conditions.source?.length && !conditions.source.includes(incident.source)) {
+    return false
+  }
+
+  if (conditions.action_type?.length && incident.action_type && !conditions.action_type.includes(incident.action_type)) {
+    return false
+  }
+
+  if (conditions.tags?.length && incident.tags?.length) {
+    const hasMatchingTag = conditions.tags.some(tag => incident.tags.includes(tag))
+    if (!hasMatchingTag) return false
+  }
+
+  if (conditions.time_range) {
+    const now = new Date()
+    const hour = now.getHours()
+    if (hour < conditions.time_range.start_hour || hour >= conditions.time_range.end_hour) {
+      return false
+    }
+  }
+
+  return true
+}
+
+export async function executeAutomationRules(
+  env: Env,
+  trigger: import('../types').AutomationTrigger,
+  incident: IncidentRecord,
+  principal: AuthPrincipal
+): Promise<Array<{ rule_id: string; rule_name: string; actions_executed: string[] }>> {
+  const rules = await getAutomationRules(env)
+  const results: Array<{ rule_id: string; rule_name: string; actions_executed: string[] }> = []
+
+  for (const rule of rules) {
+    if (!rule.enabled) continue
+    if (rule.trigger !== trigger) continue
+    if (!matchesAutomationConditions(incident, rule.conditions)) continue
+
+    const actionsExecuted: string[] = []
+
+    for (const action of rule.actions) {
+      try {
+        switch (action.type) {
+          case 'assign':
+            await assignIncident(env, incident, action.assignee_id)
+            actionsExecuted.push(`assign:${action.assignee_id}`)
+            break
+
+          case 'escalate':
+            await escalateIncident(env, incident, action.target_severity)
+            actionsExecuted.push(`escalate:${action.target_severity}`)
+            break
+
+          case 'add_tags':
+            await addIncidentTags(env, incident, action.tags)
+            actionsExecuted.push(`add_tags:${action.tags.join(',')}`)
+            break
+
+          case 'notify':
+            // Log notification activity
+            await logIncidentActivity(env, incident.id, 'notification_sent', {
+              user_id: principal.sub,
+            }, {
+              channels: action.channels,
+              recipients: action.recipients,
+            })
+            actionsExecuted.push(`notify:${action.channels.join(',')}`)
+            break
+
+          case 'execute_runbook':
+            await executeRunbookForIncident(env, incident, action.playbook_id, principal)
+            actionsExecuted.push(`execute_runbook:${action.playbook_id}`)
+            break
+
+          case 'set_sla':
+            const newDeadline = new Date(Date.now() + action.minutes * 60 * 1000).toISOString()
+            const updated: IncidentRecord = {
+              ...incident,
+              sla_deadline: newDeadline,
+              updated_at: nowIso(),
+            }
+            await storeIncident(env, updated)
+            actionsExecuted.push(`set_sla:${action.minutes}`)
+            break
+
+          case 'add_comment':
+            await addIncidentComment(env, incident, principal, { content: action.content })
+            actionsExecuted.push('add_comment')
+            break
+        }
+      } catch (err) {
+        console.error(`Failed to execute automation action: ${action.type}`, err)
+      }
+    }
+
+    if (actionsExecuted.length > 0) {
+      results.push({
+        rule_id: rule.id,
+        rule_name: rule.name,
+        actions_executed: actionsExecuted,
+      })
+    }
+  }
+
+  return results
+}
+
+// ==================== Post-Mortems ====================
+
+const POSTMORTEM_PREFIX = `${INCIDENT_PREFIX}postmortem:`
+
+function postMortemKey(incidentId: string): string {
+  return `${POSTMORTEM_PREFIX}${incidentId}`
+}
+
+export async function createPostMortem(
+  env: Env,
+  principal: AuthPrincipal,
+  incidentId: string,
+  input: Omit<import('../types').IncidentPostMortem, 'id' | 'incident_id' | 'created_by' | 'created_at' | 'updated_at'>
+): Promise<import('../types').IncidentPostMortem> {
+  const incident = await getIncident(env, incidentId)
+  if (!incident) {
+    throw new Error('Incident not found')
+  }
+
+  const now = nowIso()
+  const postMortem: import('../types').IncidentPostMortem = {
+    ...input,
+    id: crypto.randomUUID(),
+    incident_id: incidentId,
+    created_by: principal.sub,
+    created_at: now,
+    updated_at: now,
+  }
+
+  await env.KV.put(postMortemKey(incidentId), JSON.stringify(postMortem), { expirationTtl: 86400 * 90 })
+
+  // Log activity
+  await logIncidentActivity(env, incidentId, 'postmortem_created', {
+    user_id: principal.sub,
+    email: principal.email,
+  }, {
+    postmortem_id: postMortem.id,
+    title: postMortem.title,
+  })
+
+  return postMortem
+}
+
+export async function getPostMortem(env: Env, incidentId: string): Promise<import('../types').IncidentPostMortem | null> {
+  return await env.KV.get(postMortemKey(incidentId), 'json') as import('../types').IncidentPostMortem | null
+}
+
+export async function updatePostMortem(
+  env: Env,
+  incidentId: string,
+  updates: Partial<Omit<import('../types').IncidentPostMortem, 'id' | 'incident_id' | 'created_by' | 'created_at'>>
+): Promise<import('../types').IncidentPostMortem | null> {
+  const existing = await getPostMortem(env, incidentId)
+  if (!existing) return null
+
+  const updated: import('../types').IncidentPostMortem = {
+    ...existing,
+    ...updates,
+    updated_at: nowIso(),
+  }
+
+  await env.KV.put(postMortemKey(incidentId), JSON.stringify(updated), { expirationTtl: 86400 * 90 })
+
+  return updated
+}
+
+export async function updateActionItemStatus(
+  env: Env,
+  incidentId: string,
+  actionItemId: string,
+  status: 'open' | 'in_progress' | 'completed'
+): Promise<import('../types').IncidentPostMortem | null> {
+  const postMortem = await getPostMortem(env, incidentId)
+  if (!postMortem) return null
+
+  const actionItem = postMortem.action_items.find(item => item.id === actionItemId)
+  if (!actionItem) return null
+
+  actionItem.status = status
+  postMortem.updated_at = nowIso()
+
+  await env.KV.put(postMortemKey(incidentId), JSON.stringify(postMortem), { expirationTtl: 86400 * 90 })
+
+  return postMortem
+}
