@@ -22,6 +22,8 @@ import { triggerWebhooks } from './webhooks'
 
 const INCIDENT_PREFIX = 'incident:'
 const INCIDENT_INDEX_KEY = `${INCIDENT_PREFIX}index`
+const SUPPRESSION_RULES_KEY = `${INCIDENT_PREFIX}suppression_rules`
+const DEDUP_WINDOW_KEY = `${INCIDENT_PREFIX}dedup:`
 
 export interface CreateIncidentInput {
   title: string
@@ -575,6 +577,48 @@ export async function canExecuteIncident(env: Env, principal: AuthPrincipal, inc
 }
 
 export async function createIncident(env: Env, principal: AuthPrincipal, input: CreateIncidentInput): Promise<IncidentRecord> {
+  // Check for suppression
+  const suppressionRule = await findMatchingSuppressionRule(env, input)
+  if (suppressionRule) {
+    const timestamp = nowIso()
+    const suppressedIncident: IncidentRecord = {
+      id: crypto.randomUUID(),
+      title: input.title,
+      summary: `[SUPPRESSED] ${input.summary || ''}`,
+      status: 'resolved',
+      severity: input.severity || 'medium',
+      source: input.source,
+      correlation_id: input.correlation_id || crypto.randomUUID(),
+      requested_by: principal.sub,
+      requested_by_email: principal.email,
+      requested_via: principal.auth_method,
+      action_type: input.action_type,
+      action_ref: input.action_ref,
+      evidence: [],
+      recommendations: [],
+      tags: ['suppressed'],
+      suppressed_by: {
+        rule_id: suppressionRule.id,
+        rule_name: suppressionRule.name,
+        matched_at: timestamp,
+        expires_at: suppressionRule.expires_at || '',
+      },
+      created_at: timestamp,
+      updated_at: timestamp,
+    }
+
+    await storeIncident(env, suppressedIncident)
+    return suppressedIncident
+  }
+
+  // Check for duplicates
+  const correlationId = input.correlation_id || crypto.randomUUID()
+  const duplicate = await findDuplicateIncident(env, correlationId)
+  if (duplicate) {
+    const updated = await incrementDuplicateCount(env, duplicate)
+    return updated
+  }
+
   const timestamp = nowIso()
   const evidence = await collectIncidentEvidence(env, input)
   const incident: IncidentRecord = {
@@ -584,7 +628,7 @@ export async function createIncident(env: Env, principal: AuthPrincipal, input: 
     status: 'open',
     severity: input.severity || 'medium',
     source: input.source,
-    correlation_id: input.correlation_id || crypto.randomUUID(),
+    correlation_id: correlationId,
     requested_by: principal.sub,
     requested_by_email: principal.email,
     requested_via: principal.auth_method,
@@ -594,6 +638,7 @@ export async function createIncident(env: Env, principal: AuthPrincipal, input: 
     recommendations: buildDefaultRecommendations(input.action_type, input.action_ref),
     links: buildIncidentLinks(input),
     tags: input.tags || [],
+    duplicate_count: 1,
     created_at: timestamp,
     updated_at: timestamp,
   }
@@ -1881,4 +1926,172 @@ export async function listAssignedIncidents(
   return incidents.filter((i): i is IncidentRecord =>
     i !== null && i.assignee_id === assigneeId && !['resolved', 'failed'].includes(i.status)
   )
+}
+
+// ==================== Deduplication ====================
+
+const DEFAULT_DEDUP_WINDOW_MINUTES = 60
+
+export async function findDuplicateIncident(
+  env: Env,
+  correlationId: string
+): Promise<IncidentRecord | null> {
+  const ids = await getIncidentIndex(env)
+  const incidents = await Promise.all(ids.slice(0, 100).map(id => getIncident(env, id)))
+
+  const cutoff = new Date(Date.now() - DEFAULT_DEDUP_WINDOW_MINUTES * 60 * 1000)
+
+  for (const incident of incidents) {
+    if (!incident) continue
+    if (incident.correlation_id !== correlationId) continue
+    if (['resolved', 'failed'].includes(incident.status)) continue
+    if (new Date(incident.created_at) < cutoff) continue
+
+    return incident
+  }
+
+  return null
+}
+
+export async function incrementDuplicateCount(
+  env: Env,
+  incident: IncidentRecord
+): Promise<IncidentRecord> {
+  const now = nowIso()
+  const updated: IncidentRecord = {
+    ...incident,
+    duplicate_count: (incident.duplicate_count || 1) + 1,
+    updated_at: now,
+  }
+
+  await storeIncident(env, updated)
+  return updated
+}
+
+// ==================== Suppression Rules ====================
+
+async function getSuppressionRules(env: Env): Promise<import('../types').SuppressionRule[]> {
+  const rules = await env.KV.get(SUPPRESSION_RULES_KEY, 'json')
+  return (rules as import('../types').SuppressionRule[] | null) || []
+}
+
+async function setSuppressionRules(env: Env, rules: import('../types').SuppressionRule[]): Promise<void> {
+  await env.KV.put(SUPPRESSION_RULES_KEY, JSON.stringify(rules), { expirationTtl: 86400 * 30 })
+}
+
+export async function createSuppressionRule(
+  env: Env,
+  principal: AuthPrincipal,
+  input: {
+    name: string
+    description?: string
+    conditions: import('../types').SuppressionRule['conditions']
+    duration_minutes: number
+  }
+): Promise<import('../types').SuppressionRule> {
+  const now = nowIso()
+  const rule: import('../types').SuppressionRule = {
+    id: crypto.randomUUID(),
+    name: input.name,
+    description: input.description,
+    enabled: true,
+    conditions: input.conditions,
+    duration_minutes: input.duration_minutes,
+    created_by: principal.sub,
+    created_at: now,
+    updated_at: now,
+    expires_at: new Date(Date.now() + input.duration_minutes * 60 * 1000).toISOString(),
+  }
+
+  const rules = await getSuppressionRules(env)
+  rules.push(rule)
+  await setSuppressionRules(env, rules)
+
+  return rule
+}
+
+export async function listSuppressionRules(env: Env): Promise<import('../types').SuppressionRule[]> {
+  return getSuppressionRules(env)
+}
+
+export async function deleteSuppressionRule(env: Env, ruleId: string): Promise<boolean> {
+  const rules = await getSuppressionRules(env)
+  const index = rules.findIndex(r => r.id === ruleId)
+  if (index === -1) return false
+
+  rules.splice(index, 1)
+  await setSuppressionRules(env, rules)
+  return true
+}
+
+export async function toggleSuppressionRule(env: Env, ruleId: string, enabled: boolean): Promise<import('../types').SuppressionRule | null> {
+  const rules = await getSuppressionRules(env)
+  const rule = rules.find(r => r.id === ruleId)
+  if (!rule) return null
+
+  rule.enabled = enabled
+  rule.updated_at = nowIso()
+  if (enabled) {
+    rule.expires_at = new Date(Date.now() + rule.duration_minutes * 60 * 1000).toISOString()
+  }
+
+  await setSuppressionRules(env, rules)
+  return rule
+}
+
+export function matchesSuppressionRule(
+  incident: CreateIncidentInput,
+  rule: import('../types').SuppressionRule
+): boolean {
+  if (!rule.enabled) return false
+  if (rule.expires_at && new Date(rule.expires_at) < new Date()) return false
+
+  const conditions = rule.conditions
+
+  if (conditions.severity?.length && incident.severity) {
+    if (!conditions.severity.includes(incident.severity)) return false
+  }
+
+  if (conditions.source?.length) {
+    if (!conditions.source.includes(incident.source)) return false
+  }
+
+  if (conditions.action_type?.length && incident.action_type) {
+    if (!conditions.action_type.includes(incident.action_type)) return false
+  }
+
+  if (conditions.title_pattern && incident.title) {
+    try {
+      const regex = new RegExp(conditions.title_pattern, 'i')
+      if (!regex.test(incident.title)) return false
+    } catch {
+      // Invalid regex, skip this condition
+    }
+  }
+
+  if (conditions.correlation_id_pattern && incident.correlation_id) {
+    try {
+      const regex = new RegExp(conditions.correlation_id_pattern, 'i')
+      if (!regex.test(incident.correlation_id)) return false
+    } catch {
+      // Invalid regex, skip this condition
+    }
+  }
+
+  return true
+}
+
+export async function findMatchingSuppressionRule(
+  env: Env,
+  input: CreateIncidentInput
+): Promise<import('../types').SuppressionRule | null> {
+  const rules = await getSuppressionRules(env)
+
+  for (const rule of rules) {
+    if (matchesSuppressionRule(input, rule)) {
+      return rule
+    }
+  }
+
+  return null
 }

@@ -47,6 +47,10 @@ import {
   addTagsHandler,
   removeTagsHandler,
   setTagsHandler,
+  listSuppressionRulesHandler,
+  createSuppressionRuleHandler,
+  deleteSuppressionRuleHandler,
+  toggleSuppressionRuleHandler,
 } from './handlers/incidents'
 import {
   listPoliciesHandler,
@@ -360,6 +364,12 @@ app.get('/api/v1/incidents/tags', authMiddleware, listTagsHandler)
 app.post('/api/v1/incidents/:id/tags', authMiddleware, addTagsHandler)
 app.delete('/api/v1/incidents/:id/tags', authMiddleware, removeTagsHandler)
 app.put('/api/v1/incidents/:id/tags', authMiddleware, setTagsHandler)
+
+// Incident suppression rules
+app.get('/api/v1/incidents/suppression-rules', authMiddleware, rbacMiddleware(['admin']), listSuppressionRulesHandler)
+app.post('/api/v1/incidents/suppression-rules', authMiddleware, rbacMiddleware(['admin']), createSuppressionRuleHandler)
+app.delete('/api/v1/incidents/suppression-rules/:ruleId', authMiddleware, rbacMiddleware(['admin']), deleteSuppressionRuleHandler)
+app.patch('/api/v1/incidents/suppression-rules/:ruleId', authMiddleware, rbacMiddleware(['admin']), toggleSuppressionRuleHandler)
 
 // Governance policies
 app.get('/api/v1/governance/policies', authMiddleware, rbacMiddleware(['admin']), listPoliciesHandler)

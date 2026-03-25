@@ -17,7 +17,9 @@ import {
   canApproveIncident,
   canExecuteIncident,
   createIncident,
+  createSuppressionRule,
   deleteIncidentComment,
+  deleteSuppressionRule,
   escalateIncident,
   executeIncident,
   getIncident,
@@ -25,11 +27,14 @@ import {
   getIncidentSlaStatus,
   getIncidentStatistics,
   listAllTags,
+  listAssignedIncidents,
   listIncidentComments,
   listIncidents,
+  listSuppressionRules,
   removeIncidentTags,
   searchIncidents,
   setIncidentTags,
+  toggleSuppressionRule,
   toIncidentDetail,
   toIncidentSummary,
   unassignIncident,
@@ -668,6 +673,95 @@ export async function bulkDeleteIncidentsHandler(c: Context<{ Bindings: Env }>) 
     })
 
     return c.json({ success: true, data: result })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+// Suppression Rules
+const createSuppressionRuleSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
+  conditions: z.object({
+    severity: z.array(z.enum(['low', 'medium', 'high', 'critical'])).optional(),
+    source: z.array(z.string()).optional(),
+    action_type: z.array(z.enum(['scale_policy', 'restart_deployment', 'scale_deployment'])).optional(),
+    title_pattern: z.string().optional(),
+    correlation_id_pattern: z.string().optional(),
+  }),
+  duration_minutes: z.number().int().min(1).max(10080), // Max 1 week
+})
+
+export async function listSuppressionRulesHandler(c: Context<{ Bindings: Env }>) {
+  const rules = await listSuppressionRules(c.env)
+  return c.json({ success: true, data: rules })
+}
+
+export async function createSuppressionRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  try {
+    const body = createSuppressionRuleSchema.parse(await c.req.json())
+    const rule = await createSuppressionRule(c.env, principal, {
+      name: body.name,
+      description: body.description,
+      conditions: body.conditions,
+      duration_minutes: body.duration_minutes,
+    })
+
+    await logAudit(c, principal.sub, 'create_suppression_rule', 'incident', {
+      rule_id: rule.id,
+      rule_name: rule.name,
+      duration_minutes: rule.duration_minutes,
+    })
+
+    return c.json({ success: true, data: rule }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function deleteSuppressionRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const ruleId = c.req.param('ruleId') as string
+
+  const deleted = await deleteSuppressionRule(c.env, ruleId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Suppression rule not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_suppression_rule', 'incident', {
+    rule_id: ruleId,
+  })
+
+  return c.json({ success: true })
+}
+
+export async function toggleSuppressionRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const ruleId = c.req.param('ruleId') as string
+
+  try {
+    const body = z.object({ enabled: z.boolean() }).parse(await c.req.json())
+    const rule = await toggleSuppressionRule(c.env, ruleId, body.enabled)
+
+    if (!rule) {
+      return c.json({ success: false, error: 'Suppression rule not found' }, 404)
+    }
+
+    await logAudit(c, principal.sub, 'toggle_suppression_rule', 'incident', {
+      rule_id: ruleId,
+      enabled: body.enabled,
+    })
+
+    return c.json({ success: true, data: rule })
   } catch (err) {
     if (err instanceof z.ZodError) {
       return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)

@@ -304,6 +304,9 @@ export interface IncidentRecord {
   assignee_id?: number
   assignee_email?: string
   assigned_at?: string
+  duplicate_of?: string
+  duplicate_count?: number
+  suppressed_by?: SuppressionMatch
   created_at: string
   updated_at: string
 }
@@ -441,6 +444,40 @@ export interface WebhookDelivery {
   last_attempt_at?: string
   success: boolean
   created_at: string
+}
+
+// Suppression Rule types
+export interface SuppressionRule {
+  id: string
+  name: string
+  description?: string
+  enabled: boolean
+  conditions: {
+    severity?: IncidentSeverity[]
+    source?: string[]
+    action_type?: IncidentActionType[]
+    title_pattern?: string
+    correlation_id_pattern?: string
+  }
+  duration_minutes: number
+  created_by: number
+  created_at: string
+  updated_at: string
+  expires_at?: string
+}
+
+export interface SuppressionMatch {
+  rule_id: string
+  rule_name: string
+  matched_at: string
+  expires_at: string
+}
+
+// Deduplication config
+export interface DeduplicationConfig {
+  window_minutes: number
+  max_duplicates: number
+  group_by: ('correlation_id' | 'source' | 'title')[]
 }
 
 // Realtime event types
