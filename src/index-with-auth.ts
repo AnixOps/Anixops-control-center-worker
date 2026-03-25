@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import { hash, compare } from 'bcryptjs'
 import { SignJWT, jwtVerify } from 'jose'
+import type { Env } from './types'
 
-const app = new Hono()
+const app = new Hono<{ Bindings: Env }>()
 
 app.get('/health', (c) => {
   return c.json({ status: 'healthy', timestamp: new Date().toISOString() })

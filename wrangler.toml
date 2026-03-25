@@ -1,12 +1,8 @@
-name = "anixops-api-auth"
-main = "src/index-with-auth.ts"
+name = "anixops-control-center-workers"
+main = "src/index-with-ws.ts"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
-
-[dev]
-port = 8787
-local_protocol = "http"
 
 [vars]
 ENVIRONMENT = "production"

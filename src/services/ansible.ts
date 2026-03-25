@@ -7,6 +7,7 @@
  */
 
 import type { Env } from '../types'
+import { buildTaskChannels, makeRealtimeEvent, publishRealtimeEvent } from '../services/realtime'
 
 // Execution status
 export type ExecutionStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'timeout'
@@ -340,6 +341,19 @@ export async function processTaskQueue(env: Env): Promise<void> {
 
       // Update task status to running
       await updateTaskStatus(env, taskData.task_id, 'running')
+      publishRealtimeEvent(makeRealtimeEvent(
+        'task.running',
+        'task',
+        buildTaskChannels(taskData.task_id, taskData.triggered_by),
+        {
+          task_id: taskData.task_id,
+          status: 'running',
+          playbook_name: taskData.playbook_name,
+        },
+        {
+          user_id: taskData.triggered_by,
+        }
+      ))
 
       // Execute on all target nodes
       const nodeResults: NodeExecutionResult[] = []
@@ -372,24 +386,29 @@ export async function processTaskQueue(env: Env): Promise<void> {
         overallStatus = 'success' // Partial success
       }
 
-      // Store results
-      const executionResult: ExecutionResult = {
-        task_id: taskData.task_id,
-        playbook_name: taskData.playbook_name,
-        status: overallStatus,
+      await updateTaskStatus(env, taskData.task_id, overallStatus, {
         total_nodes: nodeResults.length,
         successful_nodes: successCount,
         failed_nodes: failedCount,
-        started_at: new Date().toISOString(),
         node_results: nodeResults,
         summary: `${successCount}/${nodeResults.length} nodes completed successfully`,
-      }
-
-      await env.KV.put(
-        `task:result:${taskData.task_id}`,
-        JSON.stringify(executionResult),
-        { expirationTtl: 86400 * 7 } // Keep for 7 days
-      )
+      })
+      publishRealtimeEvent(makeRealtimeEvent(
+        `task.${overallStatus}`,
+        'task',
+        buildTaskChannels(taskData.task_id, taskData.triggered_by),
+        {
+          task_id: taskData.task_id,
+          status: overallStatus,
+          playbook_name: taskData.playbook_name,
+          total_nodes: nodeResults.length,
+          successful_nodes: successCount,
+          failed_nodes: failedCount,
+        },
+        {
+          user_id: taskData.triggered_by,
+        }
+      ))
 
       // Remove from queue
       await env.KV.delete(key.name)

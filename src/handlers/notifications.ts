@@ -2,6 +2,7 @@ import type { Context } from 'hono'
 import { z } from 'zod'
 import type { Env } from '../types'
 import { logAudit } from '../utils/audit'
+import { buildChannels, makeRealtimeEvent, publishRealtimeEvent } from '../services/realtime'
 
 const createNotificationSchema = z.object({
   title: z.string().min(1).max(200),
@@ -102,6 +103,18 @@ export async function markAllNotificationsReadHandler(c: Context<{ Bindings: Env
     .bind(user.sub)
     .run()
 
+  publishRealtimeEvent(makeRealtimeEvent(
+    'notification.read_all',
+    'user',
+    buildChannels('global', 'notifications', `user:${user.sub}`),
+    {
+      user_id: user.sub,
+    },
+    {
+      user_id: user.sub,
+    }
+  ))
+
   return c.json({
     success: true,
     message: 'All notifications marked as read',
@@ -123,6 +136,19 @@ export async function deleteNotificationHandler(c: Context<{ Bindings: Env }>) {
   if (result.meta.changes === 0) {
     return c.json({ success: false, error: 'Notification not found' }, 404)
   }
+
+  publishRealtimeEvent(makeRealtimeEvent(
+    'notification.deleted',
+    'user',
+    buildChannels('global', 'notifications', `user:${user.sub}`),
+    {
+      notification_id: notificationId,
+      user_id: user.sub,
+    },
+    {
+      user_id: user.sub,
+    }
+  ))
 
   return c.json({
     success: true,
@@ -160,6 +186,22 @@ export async function createNotificationHandler(c: Context<{ Bindings: Env }>) {
       .first()
 
     await logAudit(c, currentUser.sub, 'create_notification', 'notification', { title: data.title })
+
+    publishRealtimeEvent(makeRealtimeEvent(
+      'notification.created',
+      'user',
+      buildChannels('global', 'notifications', `user:${targetUserId}`),
+      {
+        notification_id: result?.id,
+        user_id: targetUserId,
+        type: data.type,
+        title: data.title,
+        message: data.message,
+      },
+      {
+        user_id: targetUserId,
+      }
+    ))
 
     return c.json({
       success: true,

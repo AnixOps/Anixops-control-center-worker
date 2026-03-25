@@ -2,6 +2,7 @@ import type { Context } from 'hono'
 import { z } from 'zod'
 import type { Env } from '../types'
 import { logAudit } from '../utils/audit'
+import { buildTaskChannels, makeRealtimeEvent, publishRealtimeEvent } from '../services/realtime'
 
 const createTaskSchema = z.object({
   playbook_id: z.number().int().positive().optional(),
@@ -204,6 +205,22 @@ export async function createTaskHandler(c: Context<{ Bindings: Env }>) {
       nodes: nodes.length,
     })
 
+    publishRealtimeEvent(makeRealtimeEvent(
+      'task.created',
+      'task',
+      buildTaskChannels(taskId, currentUser.sub),
+      {
+        task_id: taskId,
+        playbook_id: playbook.id,
+        playbook_name: playbook.name,
+        status: 'pending',
+        target_nodes: queueItem.nodes,
+      },
+      {
+        user_id: currentUser.sub,
+      }
+    ))
+
     return c.json({
       success: true,
       data: {
@@ -245,6 +262,19 @@ export async function cancelTaskHandler(c: Context<{ Bindings: Env }>) {
   await c.env.KV.delete(`task:queue:${taskId}`)
 
   await logAudit(c, currentUser.sub, 'cancel_task', 'task', { task_id: taskId })
+
+  publishRealtimeEvent(makeRealtimeEvent(
+    'task.cancelled',
+    'task',
+    buildTaskChannels(taskId, currentUser.sub),
+    {
+      task_id: taskId,
+      status: 'cancelled',
+    },
+    {
+      user_id: currentUser.sub,
+    }
+  ))
 
   return c.json({
     success: true,
@@ -314,6 +344,20 @@ export async function retryTaskHandler(c: Context<{ Bindings: Env }>) {
     original_task_id: taskId,
     new_task_id: newTaskId,
   })
+
+  publishRealtimeEvent(makeRealtimeEvent(
+    'task.retried',
+    'task',
+    buildTaskChannels(newTaskId, currentUser.sub),
+    {
+      original_task_id: taskId,
+      task_id: newTaskId,
+      status: 'pending',
+    },
+    {
+      user_id: currentUser.sub,
+    }
+  ))
 
   return c.json({
     success: true,

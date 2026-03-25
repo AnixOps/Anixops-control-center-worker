@@ -74,43 +74,61 @@ describe('sse handlers', () => {
   it('subscribes and unsubscribes valid channels', async () => {
     const user = { sub: 99, email: 'u@test.com', role: 'operator' }
 
-    const streamResponse = await sseHandler(createContext(user) as any)
-
     const subscribeRes = await sseSubscribeHandler(createContext(user, { channel: 'nodes' }) as any)
     expect(subscribeRes.status).toBe(200)
-
-    const statusRes = await sseStatusHandler(createContext(user) as any)
-    expect(statusRes.status).toBe(200)
-    const statusBody = await statusRes.json() as {
-      data: { connections: Array<{ channels: string[] }> }
-    }
-    const channels = statusBody.data.connections[0]?.channels || []
-    expect(channels).toContain('nodes')
+    const subscribeBody = await subscribeRes.json() as { success: boolean; message: string }
+    expect(subscribeBody.success).toBe(true)
+    expect(subscribeBody.message).toContain('nodes')
 
     const unsubscribeRes = await sseUnsubscribeHandler(createContext(user, { channel: 'nodes' }) as any)
     expect(unsubscribeRes.status).toBe(200)
-
-    await streamResponse.body?.cancel()
+    const unsubscribeBody = await unsubscribeRes.json() as { success: boolean; message: string }
+    expect(unsubscribeBody.success).toBe(true)
+    expect(unsubscribeBody.message).toContain('nodes')
   })
 
-  it('returns user-scoped status for non-admin and all connections for admin', async () => {
+  it('subscribes and unsubscribes incident channels', async () => {
+    const user = { sub: 99, email: 'u@test.com', role: 'operator' }
+
+    const subscribeRes = await sseSubscribeHandler(createContext(user, { channel: 'incident:abc123' }) as any)
+    expect(subscribeRes.status).toBe(200)
+    const subscribeBody = await subscribeRes.json() as { success: boolean; message: string }
+    expect(subscribeBody.success).toBe(true)
+    expect(subscribeBody.message).toContain('incident:abc123')
+
+    const unsubscribeRes = await sseUnsubscribeHandler(createContext(user, { channel: 'incident:abc123' }) as any)
+    expect(unsubscribeRes.status).toBe(200)
+    const unsubscribeBody = await unsubscribeRes.json() as { success: boolean; message: string }
+    expect(unsubscribeBody.success).toBe(true)
+    expect(unsubscribeBody.message).toContain('incident:abc123')
+  })
+
+  it('returns realtime status for any user role', async () => {
     const user = { sub: 33, email: 'user@test.com', role: 'operator' }
     const admin = { sub: 1, email: 'admin@test.com', role: 'admin' }
 
-    const streamResponse = await sseHandler(createContext(user) as any)
-
     const userStatusRes = await sseStatusHandler(createContext(user) as any)
+    expect(userStatusRes.status).toBe(200)
     const userStatusBody = await userStatusRes.json() as {
-      data: { total: number }
+      success: boolean
+      data: { connections: unknown[]; total: number; message: string; stats: unknown }
     }
-    expect(userStatusBody.data.total).toBeGreaterThanOrEqual(1)
+    expect(userStatusBody.success).toBe(true)
+    expect(userStatusBody.data.total).toBe(0)
+    expect(userStatusBody.data.connections).toEqual([])
+    expect(userStatusBody.data.message).toBe('Realtime event center is live')
+    expect(userStatusBody.data.stats).toBeDefined()
 
     const adminStatusRes = await sseStatusHandler(createContext(admin) as any)
+    expect(adminStatusRes.status).toBe(200)
     const adminStatusBody = await adminStatusRes.json() as {
-      data: { total: number }
+      success: boolean
+      data: { connections: unknown[]; total: number; message: string; stats: unknown }
     }
-    expect(adminStatusBody.data.total).toBeGreaterThanOrEqual(1)
-
-    await streamResponse.body?.cancel()
+    expect(adminStatusBody.success).toBe(true)
+    expect(adminStatusBody.data.total).toBe(0)
+    expect(adminStatusBody.data.connections).toEqual([])
+    expect(adminStatusBody.data.message).toBe('Realtime event center is live')
+    expect(adminStatusBody.data.stats).toBeDefined()
   })
 })

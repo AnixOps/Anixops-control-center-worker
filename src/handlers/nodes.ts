@@ -2,6 +2,7 @@ import type { Context } from 'hono'
 import { z } from 'zod'
 import type { Env, Node } from '../types'
 import { logAudit } from '../utils/audit'
+import { buildNodeChannels, makeRealtimeEvent, publishRealtimeEvent } from '../services/realtime'
 
 const createNodeSchema = z.object({
   name: z.string().min(1).max(100),
@@ -119,6 +120,27 @@ export async function createNodeHandler(c: Context<{ Bindings: Env }>) {
     // 记录审计日志
     await logAudit(c, user.sub, 'create_node', 'node', { node_id: result?.id, name: data.name })
 
+    publishRealtimeEvent(makeRealtimeEvent(
+      'node.created',
+      'node',
+      buildNodeChannels(result?.id || data.name),
+      {
+        node_id: result?.id,
+        name: data.name,
+        host: data.host,
+        port: data.port,
+        status: 'offline',
+      },
+      {
+        user_id: user.sub,
+        resource: {
+          kind: 'node',
+          id: result?.id || data.name,
+          name: data.name,
+        },
+      }
+    ))
+
     return c.json({
       success: true,
       data: result,
@@ -191,6 +213,27 @@ export async function updateNodeHandler(c: Context<{ Bindings: Env }>) {
 
     await logAudit(c, user.sub, 'update_node', 'node', { node_id: id })
 
+    publishRealtimeEvent(makeRealtimeEvent(
+      'node.updated',
+      'node',
+      buildNodeChannels(id),
+      {
+        node_id: Number(id),
+        name: data.name || result?.name,
+        host: data.host || result?.host,
+        port: data.port || result?.port,
+        status: data.status || result?.status,
+      },
+      {
+        user_id: user.sub,
+        resource: {
+          kind: 'node',
+          id: Number(id),
+          name: result?.name,
+        },
+      }
+    ))
+
     return c.json({
       success: true,
       data: result,
@@ -221,6 +264,22 @@ export async function deleteNodeHandler(c: Context<{ Bindings: Env }>) {
 
   await logAudit(c, user.sub, 'delete_node', 'node', { node_id: id })
 
+  publishRealtimeEvent(makeRealtimeEvent(
+    'node.deleted',
+    'node',
+    buildNodeChannels(id),
+    {
+      node_id: Number(id),
+    },
+    {
+      user_id: user.sub,
+      resource: {
+        kind: 'node',
+        id: Number(id),
+      },
+    }
+  ))
+
   return c.json({
     success: true,
     message: 'Node deleted successfully',
@@ -248,6 +307,25 @@ export async function startNodeHandler(c: Context<{ Bindings: Env }>) {
     .prepare('UPDATE nodes SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
     .bind('maintenance', id)
     .run()
+
+  publishRealtimeEvent(makeRealtimeEvent(
+    'node.action',
+    'node',
+    buildNodeChannels(id),
+    {
+      node_id: Number(id),
+      action: 'start',
+      status: 'starting',
+    },
+    {
+      user_id: user.sub,
+      resource: {
+        kind: 'node',
+        id: Number(id),
+        name: node.name,
+      },
+    }
+  ))
 
   // 模拟启动操作 (实际应该通过SSH或API调用)
   // 这里我们异步更新状态
@@ -286,6 +364,25 @@ export async function stopNodeHandler(c: Context<{ Bindings: Env }>) {
     .bind('maintenance', id)
     .run()
 
+  publishRealtimeEvent(makeRealtimeEvent(
+    'node.action',
+    'node',
+    buildNodeChannels(id),
+    {
+      node_id: Number(id),
+      action: 'stop',
+      status: 'stopping',
+    },
+    {
+      user_id: user.sub,
+      resource: {
+        kind: 'node',
+        id: Number(id),
+        name: node.name,
+      },
+    }
+  ))
+
   // 异步执行停止操作
   c.executionCtx.waitUntil(
     simulateNodeOperation(c.env, id, 'stop')
@@ -321,6 +418,25 @@ export async function restartNodeHandler(c: Context<{ Bindings: Env }>) {
     .prepare('UPDATE nodes SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
     .bind('maintenance', id)
     .run()
+
+  publishRealtimeEvent(makeRealtimeEvent(
+    'node.action',
+    'node',
+    buildNodeChannels(id),
+    {
+      node_id: Number(id),
+      action: 'restart',
+      status: 'restarting',
+    },
+    {
+      user_id: user.sub,
+      resource: {
+        kind: 'node',
+        id: Number(id),
+        name: node.name,
+      },
+    }
+  ))
 
   // 异步执行重启操作
   c.executionCtx.waitUntil(
@@ -438,6 +554,7 @@ export async function getNodeLogsHandler(c: Context<{ Bindings: Env }>) {
  */
 export async function testNodeConnectionHandler(c: Context<{ Bindings: Env }>) {
   const id = c.req.param('id') as string
+  const user = c.get('user')
 
   const node = await c.env.DB
     .prepare('SELECT * FROM nodes WHERE id = ?')
@@ -467,6 +584,26 @@ export async function testNodeConnectionHandler(c: Context<{ Bindings: Env }>) {
     .bind(isOnline ? 'online' : 'offline', id)
     .run()
 
+  publishRealtimeEvent(makeRealtimeEvent(
+    'node.connection_tested',
+    'node',
+    buildNodeChannels(id),
+    {
+      node_id: Number(id),
+      reachable: isOnline,
+      response_time: result.response_time,
+      tested_at: result.tested_at,
+    },
+    {
+      user_id: user?.sub,
+      resource: {
+        kind: 'node',
+        id: Number(id),
+        name: node.name,
+      },
+    }
+  ))
+
   return c.json({
     success: true,
     data: result,
@@ -490,6 +627,24 @@ export async function syncNodeHandler(c: Context<{ Bindings: Env }>) {
   }
 
   await logAudit(c, user.sub, 'sync_node', 'node', { node_id: id, node_name: node.name })
+
+  publishRealtimeEvent(makeRealtimeEvent(
+    'node.synced',
+    'node',
+    buildNodeChannels(id),
+    {
+      node_id: Number(id),
+      synced_at: new Date().toISOString(),
+    },
+    {
+      user_id: user.sub,
+      resource: {
+        kind: 'node',
+        id: Number(id),
+        name: node.name,
+      },
+    }
+  ))
 
   return c.json({
     success: true,
@@ -540,6 +695,22 @@ export async function bulkActionHandler(c: Context<{ Bindings: Env }>) {
             .prepare('DELETE FROM nodes WHERE id = ?')
             .bind(node.id)
             .run()
+          publishRealtimeEvent(makeRealtimeEvent(
+            'node.deleted',
+            'node',
+            buildNodeChannels(node.id),
+            {
+              node_id: node.id,
+            },
+            {
+              user_id: user.sub,
+              resource: {
+                kind: 'node',
+                id: node.id,
+                name: node.name,
+              },
+            }
+          ))
         } else {
           // 更新状态
           const newStatus = action === 'stop' ? 'offline' : 'maintenance'

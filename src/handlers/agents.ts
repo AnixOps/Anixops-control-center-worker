@@ -7,6 +7,7 @@ import type { Context } from 'hono'
 import type { Env } from '../types'
 import { z } from 'zod'
 import { logAudit } from '../utils/audit'
+import { buildNodeChannels, makeRealtimeEvent, publishRealtimeEvent } from '../services/realtime'
 
 // Agent registration schema
 const registerAgentSchema = z.object({
@@ -107,6 +108,26 @@ export async function registerAgentHandler(c: Context<{ Bindings: Env }>) {
       node_id: node.id,
     })
 
+    publishRealtimeEvent(makeRealtimeEvent(
+      'agent.registered',
+      'node',
+      buildNodeChannels(node.id),
+      {
+        agent_id: data.agent_id,
+        node_id: node.id,
+        hostname: data.hostname,
+        status: 'online',
+      },
+      {
+        user_id: user?.sub,
+        resource: {
+          kind: 'agent',
+          id: data.agent_id,
+          name: data.hostname,
+        },
+      }
+    ))
+
     return c.json({
       success: true,
       data: {
@@ -164,6 +185,24 @@ export async function agentHeartbeatHandler(c: Context<{ Bindings: Env }>) {
       `)
       .bind(node.id)
       .run()
+
+    publishRealtimeEvent(makeRealtimeEvent(
+      'agent.heartbeat',
+      'node',
+      buildNodeChannels(node.id),
+      {
+        agent_id: agentId,
+        node_id: node.id,
+        status: data.status || 'online',
+        timestamp: data.timestamp,
+      },
+      {
+        resource: {
+          kind: 'agent',
+          id: agentId,
+        },
+      }
+    ))
 
     // Check for pending commands
     const pendingCommands = await c.env.KV.get(`agent:commands:${agentId}`, 'json') as Array<{
@@ -242,6 +281,26 @@ export async function agentMetricsHandler(c: Context<{ Bindings: Env }>) {
       expirationTtl: 3600,
     })
 
+    publishRealtimeEvent(makeRealtimeEvent(
+      'agent.metrics',
+      'node',
+      buildNodeChannels(node.id),
+      {
+        agent_id: agentId,
+        node_id: node.id,
+        cpu_usage: data.cpu_usage,
+        memory_usage: data.memory_usage,
+        disk_usage: data.disk_usage,
+        timestamp: data.timestamp,
+      },
+      {
+        resource: {
+          kind: 'agent',
+          id: agentId,
+        },
+      }
+    ))
+
     return c.json({ success: true, data: { stored: true } })
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -300,6 +359,28 @@ export async function agentCommandResultHandler(c: Context<{ Bindings: Env }>) {
       command_id: body.command_id,
       success: body.success,
     })
+
+    publishRealtimeEvent(makeRealtimeEvent(
+      'agent.command_result',
+      'node',
+      buildNodeChannels(node.id),
+      {
+        agent_id: agentId,
+        node_id: node.id,
+        command_id: body.command_id,
+        success: body.success,
+        output: body.output,
+        error: body.error,
+        duration: body.duration,
+      },
+      {
+        user_id: user?.sub,
+        resource: {
+          kind: 'agent',
+          id: agentId,
+        },
+      }
+    ))
 
     return c.json({ success: true, data: { received: true } })
   } catch (err) {
@@ -363,6 +444,26 @@ export async function sendAgentCommandHandler(c: Context<{ Bindings: Env }>) {
       command_id: commandId,
       command_type: body.type,
     })
+
+    publishRealtimeEvent(makeRealtimeEvent(
+      'agent.command_queued',
+      'node',
+      buildNodeChannels(node.id),
+      {
+        agent_id: agentId,
+        node_id: node.id,
+        command_id: commandId,
+        type: body.type,
+        status: 'queued',
+      },
+      {
+        user_id: user.sub,
+        resource: {
+          kind: 'agent',
+          id: agentId,
+        },
+      }
+    ))
 
     return c.json({
       success: true,

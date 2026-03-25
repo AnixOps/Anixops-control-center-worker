@@ -92,7 +92,7 @@ describe('websocketHandler', () => {
 
     const connected = JSON.parse(server.sent[0])
     expect(connected.type).toBe('connected')
-    expect(connected.payload.userId).toBe(42)
+    expect(connected.payload.user_id).toBe(42)
 
     server.emit('message', { data: JSON.stringify({ type: 'ping' }) })
     expect(server.sent.some(m => JSON.parse(m).type === 'pong')).toBe(true)
@@ -102,6 +102,18 @@ describe('websocketHandler', () => {
 
     server.emit('message', { data: JSON.stringify({ type: 'unsubscribe', payload: 'nodes' }) })
     expect(server.sent.some(m => JSON.parse(m).type === 'unsubscribed')).toBe(true)
+
+    server.emit('message', { data: JSON.stringify({ type: 'subscribe', payload: 'incident:abc123' }) })
+    expect(server.sent.some(m => {
+      const data = JSON.parse(m)
+      return data.type === 'subscribed' && data.payload.channel === 'incident:abc123'
+    })).toBe(true)
+
+    server.emit('message', { data: JSON.stringify({ type: 'unsubscribe', payload: 'incident:abc123' }) })
+    expect(server.sent.some(m => {
+      const data = JSON.parse(m)
+      return data.type === 'unsubscribed' && data.payload.channel === 'incident:abc123'
+    })).toBe(true)
 
     server.emit('message', { data: JSON.stringify({ type: 'invalid_type' }) })
     expect(server.sent.some(m => {
@@ -125,5 +137,33 @@ describe('websocketHandler', () => {
       const data = JSON.parse(m)
       return data.type === 'error' && data.payload === 'Invalid message format'
     })).toBe(true)
+  })
+
+  it('clears the heartbeat interval when the socket closes', async () => {
+    const client = new FakeWebSocket()
+    const server = new FakeWebSocket()
+
+    ;(globalThis as any).WebSocketPair = vi.fn(() => [client, server])
+
+    const c = createContext({ sub: 11 }, 'websocket')
+    await expect(websocketHandler(c as any)).rejects.toThrow('init["status"] must be in the range of 200 to 599')
+
+    server.emit('close')
+
+    expect(globalThis.clearInterval).toHaveBeenCalledWith(1)
+  })
+
+  it('clears the heartbeat interval when the socket errors', async () => {
+    const client = new FakeWebSocket()
+    const server = new FakeWebSocket()
+
+    ;(globalThis as any).WebSocketPair = vi.fn(() => [client, server])
+
+    const c = createContext({ sub: 12 }, 'websocket')
+    await expect(websocketHandler(c as any)).rejects.toThrow('init["status"] must be in the range of 200 to 599')
+
+    server.emit('error')
+
+    expect(globalThis.clearInterval).toHaveBeenCalledWith(1)
   })
 })
