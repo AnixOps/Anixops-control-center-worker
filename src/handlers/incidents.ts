@@ -17,11 +17,14 @@ import {
   canApproveIncident,
   canExecuteIncident,
   createIncident,
+  createNotificationRule,
   createSuppressionRule,
   deleteIncidentComment,
+  deleteNotificationRule,
   deleteSuppressionRule,
   escalateIncident,
   executeIncident,
+  generateIncidentReport,
   getIncident,
   getIncidentComment,
   getIncidentSlaStatus,
@@ -30,11 +33,13 @@ import {
   listAssignedIncidents,
   listIncidentComments,
   listIncidents,
+  listNotificationRules,
   listSuppressionRules,
   mergeIncidents,
   removeIncidentTags,
   searchIncidents,
   setIncidentTags,
+  toggleNotificationRule,
   toggleSuppressionRule,
   toIncidentDetail,
   toIncidentSummary,
@@ -810,4 +815,111 @@ export async function mergeIncidentsHandler(c: Context<{ Bindings: Env }>) {
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Merge failed' }, 400)
   }
+}
+
+// Notification Rules
+const createNotificationRuleSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
+  conditions: z.object({
+    severity: z.array(z.enum(['low', 'medium', 'high', 'critical'])).optional(),
+    source: z.array(z.string()).optional(),
+    action_type: z.array(z.enum(['scale_policy', 'restart_deployment', 'scale_deployment'])).optional(),
+    status: z.array(z.enum(['open', 'analyzed', 'approved', 'executing', 'resolved', 'failed'])).optional(),
+    tags: z.array(z.string()).optional(),
+  }),
+  channels: z.array(z.enum(['email', 'webhook', 'slack'])).min(1),
+  recipients: z.array(z.string()).min(1),
+  template: z.string().optional(),
+})
+
+export async function listNotificationRulesHandler(c: Context<{ Bindings: Env }>) {
+  const rules = await listNotificationRules(c.env)
+  return c.json({ success: true, data: rules })
+}
+
+export async function createNotificationRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  try {
+    const body = createNotificationRuleSchema.parse(await c.req.json())
+    const rule = await createNotificationRule(c.env, principal, {
+      name: body.name,
+      description: body.description,
+      conditions: body.conditions,
+      channels: body.channels,
+      recipients: body.recipients,
+      template: body.template,
+    })
+
+    await logAudit(c, principal.sub, 'create_notification_rule', 'incident', {
+      rule_id: rule.id,
+      rule_name: rule.name,
+      channels: rule.channels,
+    })
+
+    return c.json({ success: true, data: rule }, 201)
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+export async function deleteNotificationRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const ruleId = c.req.param('ruleId') as string
+
+  const deleted = await deleteNotificationRule(c.env, ruleId)
+
+  if (!deleted) {
+    return c.json({ success: false, error: 'Notification rule not found' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'delete_notification_rule', 'incident', {
+    rule_id: ruleId,
+  })
+
+  return c.json({ success: true })
+}
+
+export async function toggleNotificationRuleHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const ruleId = c.req.param('ruleId') as string
+
+  try {
+    const body = z.object({ enabled: z.boolean() }).parse(await c.req.json())
+    const rule = await toggleNotificationRule(c.env, ruleId, body.enabled)
+
+    if (!rule) {
+      return c.json({ success: false, error: 'Notification rule not found' }, 404)
+    }
+
+    await logAudit(c, principal.sub, 'toggle_notification_rule', 'incident', {
+      rule_id: ruleId,
+      enabled: body.enabled,
+    })
+
+    return c.json({ success: true, data: rule })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    throw err
+  }
+}
+
+// Reports
+const reportQuerySchema = z.object({
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+})
+
+export async function getIncidentReportHandler(c: Context<{ Bindings: Env }>) {
+  const rawQuery = Object.fromEntries(new URL(c.req.url).searchParams)
+  const query = reportQuerySchema.parse(rawQuery)
+
+  const report = await generateIncidentReport(c.env, query.start_date, query.end_date)
+  return c.json({ success: true, data: report })
 }

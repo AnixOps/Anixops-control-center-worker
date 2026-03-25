@@ -481,6 +481,60 @@ export interface DeduplicationConfig {
   group_by: ('correlation_id' | 'source' | 'title')[]
 }
 
+// Notification Rule types for incidents
+export interface NotificationRule {
+  id: string
+  name: string
+  description?: string
+  enabled: boolean
+  conditions: {
+    severity?: IncidentSeverity[]
+    source?: string[]
+    action_type?: IncidentActionType[]
+    status?: IncidentStatus[]
+    tags?: string[]
+  }
+  channels: ('email' | 'webhook' | 'slack')[]
+  recipients: string[]
+  template?: string
+  created_by: number
+  created_at: string
+  updated_at: string
+}
+
+// Incident Report types
+export interface IncidentTrend {
+  date: string
+  total: number
+  by_severity: Record<IncidentSeverity, number>
+  by_status: Record<IncidentStatus, number>
+  resolved_count: number
+  avg_resolution_time_minutes: number
+}
+
+export interface IncidentReport {
+  period: {
+    start: string
+    end: string
+  }
+  summary: {
+    total_incidents: number
+    open_incidents: number
+    resolved_incidents: number
+    avg_resolution_time_minutes: number
+    sla_breach_count: number
+    sla_compliance_rate: number
+  }
+  by_severity: Record<IncidentSeverity, { count: number; percentage: number }>
+  by_status: Record<IncidentStatus, { count: number; percentage: number }>
+  by_source: Array<{ source: string; count: number; percentage: number }>
+  by_action_type: Array<{ action_type: string; count: number; success_rate: number }>
+  trends: IncidentTrend[]
+  top_tags: Array<{ tag: string; count: number }>
+  top_sources: Array<{ source: string; count: number }>
+  mttr_by_severity: Record<IncidentSeverity, number>
+}
+
 // Realtime event types
 export type RealtimeScope = 'global' | 'tenant' | 'user' | 'node' | 'task' | 'audit' | 'incident' | 'system'
 

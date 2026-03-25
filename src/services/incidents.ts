@@ -2221,3 +2221,324 @@ export async function mergeIncidents(
     merged_count: merged.length,
   }
 }
+
+// ==================== Notification Rules ====================
+
+const NOTIFICATION_RULES_KEY = `${INCIDENT_PREFIX}notification_rules`
+
+async function getNotificationRules(env: Env): Promise<import('../types').NotificationRule[]> {
+  const rules = await env.KV.get(NOTIFICATION_RULES_KEY, 'json')
+  return (rules as import('../types').NotificationRule[] | null) || []
+}
+
+async function setNotificationRules(env: Env, rules: import('../types').NotificationRule[]): Promise<void> {
+  await env.KV.put(NOTIFICATION_RULES_KEY, JSON.stringify(rules), { expirationTtl: 86400 * 30 })
+}
+
+export async function createNotificationRule(
+  env: Env,
+  principal: AuthPrincipal,
+  input: {
+    name: string
+    description?: string
+    conditions: import('../types').NotificationRule['conditions']
+    channels: import('../types').NotificationRule['channels']
+    recipients: string[]
+    template?: string
+  }
+): Promise<import('../types').NotificationRule> {
+  const now = nowIso()
+  const rule: import('../types').NotificationRule = {
+    id: crypto.randomUUID(),
+    name: input.name,
+    description: input.description,
+    enabled: true,
+    conditions: input.conditions,
+    channels: input.channels,
+    recipients: input.recipients,
+    template: input.template,
+    created_by: principal.sub,
+    created_at: now,
+    updated_at: now,
+  }
+
+  const rules = await getNotificationRules(env)
+  rules.push(rule)
+  await setNotificationRules(env, rules)
+
+  return rule
+}
+
+export async function listNotificationRules(env: Env): Promise<import('../types').NotificationRule[]> {
+  return getNotificationRules(env)
+}
+
+export async function deleteNotificationRule(env: Env, ruleId: string): Promise<boolean> {
+  const rules = await getNotificationRules(env)
+  const index = rules.findIndex(r => r.id === ruleId)
+  if (index === -1) return false
+
+  rules.splice(index, 1)
+  await setNotificationRules(env, rules)
+  return true
+}
+
+export async function toggleNotificationRule(
+  env: Env,
+  ruleId: string,
+  enabled: boolean
+): Promise<import('../types').NotificationRule | null> {
+  const rules = await getNotificationRules(env)
+  const rule = rules.find(r => r.id === ruleId)
+  if (!rule) return null
+
+  rule.enabled = enabled
+  rule.updated_at = nowIso()
+
+  await setNotificationRules(env, rules)
+  return rule
+}
+
+export function matchesNotificationRule(
+  incident: IncidentRecord,
+  rule: import('../types').NotificationRule
+): boolean {
+  if (!rule.enabled) return false
+
+  const conditions = rule.conditions
+
+  if (conditions.severity?.length && incident.severity) {
+    if (!conditions.severity.includes(incident.severity)) return false
+  }
+
+  if (conditions.source?.length) {
+    if (!conditions.source.includes(incident.source)) return false
+  }
+
+  if (conditions.action_type?.length && incident.action_type) {
+    if (!conditions.action_type.includes(incident.action_type)) return false
+  }
+
+  if (conditions.status?.length) {
+    if (!conditions.status.includes(incident.status)) return false
+  }
+
+  if (conditions.tags?.length && incident.tags?.length) {
+    const hasMatchingTag = conditions.tags.some(tag =>
+      incident.tags.includes(tag)
+    )
+    if (!hasMatchingTag) return false
+  }
+
+  return true
+}
+
+export async function findMatchingNotificationRules(
+  env: Env,
+  incident: IncidentRecord
+): Promise<import('../types').NotificationRule[]> {
+  const rules = await getNotificationRules(env)
+  return rules.filter(rule => matchesNotificationRule(incident, rule))
+}
+
+// ==================== Reports ====================
+
+export async function generateIncidentReport(
+  env: Env,
+  startDate: string,
+  endDate: string
+): Promise<import('../types').IncidentReport> {
+  const ids = await getIncidentIndex(env)
+  const incidents = await Promise.all(ids.map(id => getIncident(env, id)))
+  const validIncidents = incidents.filter((i): i is IncidentRecord => i !== null)
+
+  // Filter by date range
+  const start = new Date(startDate)
+  const end = new Date(endDate)
+  const filteredIncidents = validIncidents.filter(i => {
+    const created = new Date(i.created_at)
+    return created >= start && created <= end
+  })
+
+  const totalIncidents = filteredIncidents.length
+  const openIncidents = filteredIncidents.filter(i => !['resolved', 'failed'].includes(i.status)).length
+  const resolvedIncidents = filteredIncidents.filter(i => i.status === 'resolved').length
+
+  // Calculate MTTR (Mean Time To Resolve)
+  const resolvedWithTime = filteredIncidents.filter(i =>
+    i.status === 'resolved' && i.created_at && i.updated_at
+  )
+  const avgResolutionTime = resolvedWithTime.length > 0
+    ? resolvedWithTime.reduce((sum, i) => {
+        const created = new Date(i.created_at)
+        const resolved = new Date(i.updated_at)
+        return sum + (resolved.getTime() - created.getTime()) / 1000 / 60
+      }, 0) / resolvedWithTime.length
+    : 0
+
+  // SLA calculations
+  const breachedIncidents = await checkSlaBreaches(env)
+  const slaBreachCount = breachedIncidents.length
+  const slaComplianceRate = totalIncidents > 0
+    ? ((totalIncidents - slaBreachCount) / totalIncidents) * 100
+    : 100
+
+  // By severity
+  const bySeverity: Record<IncidentSeverity, { count: number; percentage: number }> = {
+    low: { count: 0, percentage: 0 },
+    medium: { count: 0, percentage: 0 },
+    high: { count: 0, percentage: 0 },
+    critical: { count: 0, percentage: 0 },
+  }
+  for (const incident of filteredIncidents) {
+    bySeverity[incident.severity].count++
+  }
+  for (const severity of Object.keys(bySeverity) as IncidentSeverity[]) {
+    bySeverity[severity].percentage = totalIncidents > 0
+      ? (bySeverity[severity].count / totalIncidents) * 100
+      : 0
+  }
+
+  // By status
+  const byStatus: Record<IncidentStatus, { count: number; percentage: number }> = {
+    open: { count: 0, percentage: 0 },
+    analyzed: { count: 0, percentage: 0 },
+    approved: { count: 0, percentage: 0 },
+    executing: { count: 0, percentage: 0 },
+    resolved: { count: 0, percentage: 0 },
+    failed: { count: 0, percentage: 0 },
+  }
+  for (const incident of filteredIncidents) {
+    byStatus[incident.status].count++
+  }
+  for (const status of Object.keys(byStatus) as IncidentStatus[]) {
+    byStatus[status].percentage = totalIncidents > 0
+      ? (byStatus[status].count / totalIncidents) * 100
+      : 0
+  }
+
+  // By source
+  const sourceCounts: Record<string, number> = {}
+  for (const incident of filteredIncidents) {
+    sourceCounts[incident.source] = (sourceCounts[incident.source] || 0) + 1
+  }
+  const bySource = Object.entries(sourceCounts)
+    .map(([source, count]) => ({
+      source,
+      count,
+      percentage: totalIncidents > 0 ? (count / totalIncidents) * 100 : 0,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+
+  // By action type
+  const actionTypeStats: Record<string, { count: number; successCount: number }> = {}
+  for (const incident of filteredIncidents) {
+    if (incident.action_type) {
+      if (!actionTypeStats[incident.action_type]) {
+        actionTypeStats[incident.action_type] = { count: 0, successCount: 0 }
+      }
+      actionTypeStats[incident.action_type].count++
+      if (incident.status === 'resolved') {
+        actionTypeStats[incident.action_type].successCount++
+      }
+    }
+  }
+  const byActionType = Object.entries(actionTypeStats)
+    .map(([action_type, stats]) => ({
+      action_type,
+      count: stats.count,
+      success_rate: stats.count > 0 ? (stats.successCount / stats.count) * 100 : 0,
+    }))
+    .sort((a, b) => b.count - a.count)
+
+  // Top tags
+  const tagCounts: Record<string, number> = {}
+  for (const incident of filteredIncidents) {
+    for (const tag of incident.tags || []) {
+      tagCounts[tag] = (tagCounts[tag] || 0) + 1
+    }
+  }
+  const topTags = Object.entries(tagCounts)
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+
+  // MTTR by severity
+  const mttrBySeverity: Record<IncidentSeverity, number> = {
+    low: 0,
+    medium: 0,
+    high: 0,
+    critical: 0,
+  }
+  for (const severity of Object.keys(mttrBySeverity) as IncidentSeverity[]) {
+    const severityIncidents = resolvedWithTime.filter(i => i.severity === severity)
+    if (severityIncidents.length > 0) {
+      mttrBySeverity[severity] = severityIncidents.reduce((sum, i) => {
+        const created = new Date(i.created_at)
+        const resolved = new Date(i.updated_at)
+        return sum + (resolved.getTime() - created.getTime()) / 1000 / 60
+      }, 0) / severityIncidents.length
+    }
+  }
+
+  // Trends (daily for the period)
+  const trends: import('../types').IncidentTrend[] = []
+  const currentDate = new Date(start)
+  while (currentDate <= end) {
+    const dateStr = currentDate.toISOString().split('T')[0]
+    const dayIncidents = filteredIncidents.filter(i =>
+      i.created_at.startsWith(dateStr)
+    )
+    const dayResolved = dayIncidents.filter(i => i.status === 'resolved')
+
+    const dayBySeverity: Record<IncidentSeverity, number> = {
+      low: 0, medium: 0, high: 0, critical: 0,
+    }
+    const dayByStatus: Record<IncidentStatus, number> = {
+      open: 0, analyzed: 0, approved: 0, executing: 0, resolved: 0, failed: 0,
+    }
+
+    for (const incident of dayIncidents) {
+      dayBySeverity[incident.severity]++
+      dayByStatus[incident.status]++
+    }
+
+    trends.push({
+      date: dateStr,
+      total: dayIncidents.length,
+      by_severity: dayBySeverity,
+      by_status: dayByStatus,
+      resolved_count: dayResolved.length,
+      avg_resolution_time_minutes: dayResolved.length > 0
+        ? dayResolved.reduce((sum, i) => {
+            const created = new Date(i.created_at)
+            const resolved = new Date(i.updated_at)
+            return sum + (resolved.getTime() - created.getTime()) / 1000 / 60
+          }, 0) / dayResolved.length
+        : 0,
+    })
+
+    currentDate.setDate(currentDate.getDate() + 1)
+  }
+
+  return {
+    period: { start: startDate, end: endDate },
+    summary: {
+      total_incidents: totalIncidents,
+      open_incidents: openIncidents,
+      resolved_incidents: resolvedIncidents,
+      avg_resolution_time_minutes: avgResolutionTime,
+      sla_breach_count: slaBreachCount,
+      sla_compliance_rate: slaComplianceRate,
+    },
+    by_severity: bySeverity,
+    by_status: byStatus,
+    by_source: bySource,
+    by_action_type: byActionType,
+    trends,
+    top_tags: topTags,
+    top_sources: bySource.slice(0, 5),
+    mttr_by_severity: mttrBySeverity,
+  }
+}

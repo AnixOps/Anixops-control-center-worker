@@ -34,6 +34,7 @@ import {
   getIncidentSlaStatusHandler,
   getIncidentTimelineHandler,
   getIncidentStatisticsHandler,
+  getIncidentReportHandler,
   searchIncidentsHandler,
   listIncidentCommentsHandler,
   addIncidentCommentHandler,
@@ -52,6 +53,10 @@ import {
   createSuppressionRuleHandler,
   deleteSuppressionRuleHandler,
   toggleSuppressionRuleHandler,
+  listNotificationRulesHandler,
+  createNotificationRuleHandler,
+  deleteNotificationRuleHandler,
+  toggleNotificationRuleHandler,
 } from './handlers/incidents'
 import {
   listPoliciesHandler,
@@ -337,6 +342,7 @@ app.delete('/api/v1/notifications/:id', authMiddleware, deleteNotificationHandle
 app.get('/api/v1/incidents', authMiddleware, listIncidentsHandler)
 app.post('/api/v1/incidents', authMiddleware, createIncidentHandler)
 app.get('/api/v1/incidents/statistics', authMiddleware, getIncidentStatisticsHandler)
+app.get('/api/v1/incidents/report', authMiddleware, rbacMiddleware(['admin', 'operator']), getIncidentReportHandler)
 app.get('/api/v1/incidents/search', authMiddleware, searchIncidentsHandler)
 
 // Bulk incident operations (must come before :id routes)
@@ -372,6 +378,12 @@ app.get('/api/v1/incidents/suppression-rules', authMiddleware, rbacMiddleware(['
 app.post('/api/v1/incidents/suppression-rules', authMiddleware, rbacMiddleware(['admin']), createSuppressionRuleHandler)
 app.delete('/api/v1/incidents/suppression-rules/:ruleId', authMiddleware, rbacMiddleware(['admin']), deleteSuppressionRuleHandler)
 app.patch('/api/v1/incidents/suppression-rules/:ruleId', authMiddleware, rbacMiddleware(['admin']), toggleSuppressionRuleHandler)
+
+// Incident notification rules
+app.get('/api/v1/incidents/notification-rules', authMiddleware, rbacMiddleware(['admin']), listNotificationRulesHandler)
+app.post('/api/v1/incidents/notification-rules', authMiddleware, rbacMiddleware(['admin']), createNotificationRuleHandler)
+app.delete('/api/v1/incidents/notification-rules/:ruleId', authMiddleware, rbacMiddleware(['admin']), deleteNotificationRuleHandler)
+app.patch('/api/v1/incidents/notification-rules/:ruleId', authMiddleware, rbacMiddleware(['admin']), toggleNotificationRuleHandler)
 
 // Governance policies
 app.get('/api/v1/governance/policies', authMiddleware, rbacMiddleware(['admin']), listPoliciesHandler)
