@@ -316,6 +316,7 @@ export type IncidentTimelineEventType =
   | 'acknowledged'
   | 'escalated'
   | 'assigned'
+  | 'merged'
   | 'analyzed'
   | 'approved'
   | 'executing'

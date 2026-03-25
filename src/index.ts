@@ -43,6 +43,7 @@ import {
   bulkExecuteIncidentsHandler,
   bulkAnalyzeIncidentsHandler,
   bulkDeleteIncidentsHandler,
+  mergeIncidentsHandler,
   listTagsHandler,
   addTagsHandler,
   removeTagsHandler,
@@ -343,6 +344,7 @@ app.post('/api/v1/incidents/bulk/analyze', authMiddleware, rbacMiddleware(['admi
 app.post('/api/v1/incidents/bulk/approve', authMiddleware, rbacMiddleware(['admin', 'operator']), bulkApproveIncidentsHandler)
 app.post('/api/v1/incidents/bulk/execute', authMiddleware, rbacMiddleware(['admin', 'operator']), bulkExecuteIncidentsHandler)
 app.post('/api/v1/incidents/bulk/delete', authMiddleware, rbacMiddleware(['admin']), bulkDeleteIncidentsHandler)
+app.post('/api/v1/incidents/merge', authMiddleware, rbacMiddleware(['admin', 'operator']), mergeIncidentsHandler)
 
 app.get('/api/v1/incidents/:id', authMiddleware, getIncidentHandler)
 app.get('/api/v1/incidents/:id/timeline', authMiddleware, getIncidentTimelineHandler)

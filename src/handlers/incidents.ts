@@ -31,6 +31,7 @@ import {
   listIncidentComments,
   listIncidents,
   listSuppressionRules,
+  mergeIncidents,
   removeIncidentTags,
   searchIncidents,
   setIncidentTags,
@@ -767,5 +768,46 @@ export async function toggleSuppressionRuleHandler(c: Context<{ Bindings: Env }>
       return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
     }
     throw err
+  }
+}
+
+// Incident Merging
+const mergeSchema = z.object({
+  primary_id: z.string().uuid(),
+  incident_ids: z.array(z.string().uuid()).min(1).max(10),
+})
+
+export async function mergeIncidentsHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+
+  try {
+    const body = mergeSchema.parse(await c.req.json())
+
+    // Ensure primary is in the list
+    if (!body.incident_ids.includes(body.primary_id)) {
+      body.incident_ids.push(body.primary_id)
+    }
+
+    const result = await mergeIncidents(c.env, body.primary_id, body.incident_ids)
+
+    await logAudit(c, principal.sub, 'merge_incidents', 'incident', {
+      primary_id: body.primary_id,
+      merged_ids: result.merged.map(i => i.id),
+      merged_count: result.merged_count,
+    })
+
+    return c.json({
+      success: true,
+      data: {
+        primary: toIncidentDetail(result.primary),
+        merged_count: result.merged_count,
+        merged_ids: result.merged.map(i => i.id),
+      },
+    })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Merge failed' }, 400)
   }
 }

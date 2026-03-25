@@ -2095,3 +2095,129 @@ export async function findMatchingSuppressionRule(
 
   return null
 }
+
+// ==================== Incident Merging ====================
+
+export interface MergeResult {
+  primary: IncidentRecord
+  merged: IncidentRecord[]
+  merged_count: number
+}
+
+export async function mergeIncidents(
+  env: Env,
+  primaryId: string,
+  incidentIds: string[]
+): Promise<MergeResult> {
+  // Get the primary incident
+  const primary = await getIncident(env, primaryId)
+  if (!primary) {
+    throw new Error('Primary incident not found')
+  }
+
+  if (['resolved', 'failed'].includes(primary.status)) {
+    throw new Error('Cannot merge into a resolved or failed incident')
+  }
+
+  // Get incidents to merge
+  const toMerge: IncidentRecord[] = []
+  for (const id of incidentIds) {
+    if (id === primaryId) continue // Skip primary
+
+    const incident = await getIncident(env, id)
+    if (!incident) continue
+    if (['resolved', 'failed'].includes(incident.status)) continue
+
+    toMerge.push(incident)
+  }
+
+  if (toMerge.length === 0) {
+    return { primary, merged: [], merged_count: 0 }
+  }
+
+  const now = nowIso()
+
+  // Merge evidence
+  const allEvidence = [...primary.evidence]
+  for (const incident of toMerge) {
+    for (const evidence of incident.evidence) {
+      // Avoid duplicate evidence
+      const exists = allEvidence.some(e =>
+        e.type === evidence.type && e.source === evidence.source && e.content === evidence.content
+      )
+      if (!exists) {
+        allEvidence.push(evidence)
+      }
+    }
+  }
+
+  // Merge tags
+  const allTags = new Set(primary.tags || [])
+  for (const incident of toMerge) {
+    for (const tag of incident.tags || []) {
+      allTags.add(tag)
+    }
+  }
+
+  // Merge recommendations
+  const allRecommendations = [...primary.recommendations]
+  for (const incident of toMerge) {
+    for (const rec of incident.recommendations) {
+      const exists = allRecommendations.some(r => r.id === rec.id)
+      if (!exists) {
+        allRecommendations.push(rec)
+      }
+    }
+  }
+
+  // Calculate total duplicate count
+  const totalDuplicates = (primary.duplicate_count || 1) +
+    toMerge.reduce((sum, i) => sum + (i.duplicate_count || 1), 0)
+
+  // Determine highest severity
+  const severityOrder: IncidentSeverity[] = ['low', 'medium', 'high', 'critical']
+  let highestSeverity = primary.severity
+  for (const incident of toMerge) {
+    if (severityOrder.indexOf(incident.severity) > severityOrder.indexOf(highestSeverity)) {
+      highestSeverity = incident.severity
+    }
+  }
+
+  // Update primary incident
+  const updatedPrimary: IncidentRecord = {
+    ...primary,
+    severity: highestSeverity,
+    evidence: allEvidence,
+    recommendations: allRecommendations,
+    tags: Array.from(allTags),
+    duplicate_count: totalDuplicates,
+    updated_at: now,
+  }
+
+  await storeIncident(env, updatedPrimary)
+
+  // Mark merged incidents as resolved
+  const merged: IncidentRecord[] = []
+  for (const incident of toMerge) {
+    const mergedIncident: IncidentRecord = {
+      ...incident,
+      status: 'resolved',
+      duplicate_of: primaryId,
+      updated_at: now,
+    }
+    await storeIncident(env, mergedIncident)
+    merged.push(mergedIncident)
+
+    // Publish merge event for each merged incident
+    publishIncidentEvent(env, mergedIncident, 'incident.merged')
+  }
+
+  // Publish update for primary
+  publishIncidentEvent(env, updatedPrimary, 'incident.updated')
+
+  return {
+    primary: updatedPrimary,
+    merged,
+    merged_count: merged.length,
+  }
+}
