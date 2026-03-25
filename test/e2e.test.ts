@@ -23,6 +23,9 @@ function createTestEnv(): Env {
     DB: createMockD1(),
     KV: createMockKV(),
     R2: createMockR2(),
+    AI: {
+      run: async () => ({ response: '{"result":"ok"}' }),
+    } as Env['AI'],
   }
 }
 
@@ -45,6 +48,58 @@ describe('E2E: Health Check', () => {
     expect(res.status).toBe(200)
     const data = await res.json() as { status: string; checks?: Record<string, boolean> }
     expect(data.status).toBe('ready')
+  })
+})
+
+describe('E2E: WebSocket Route', () => {
+  let env: Env
+  let authToken: string
+
+  beforeAll(async () => {
+    env = createTestEnv()
+
+    await app.request('/api/v1/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'wsuser@example.com',
+        password: 'WsUser123!',
+        role: 'admin',
+      }),
+    }, env)
+
+    const loginRes = await app.request('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'wsuser@example.com',
+        password: 'WsUser123!',
+      }),
+    }, env)
+
+    const loginData = await loginRes.json() as { data?: { access_token: string } }
+    authToken = loginData.data?.access_token || ''
+  })
+
+  it('should reject websocket access without a token', async () => {
+    const res = await app.request('/api/v1/ws', {
+      method: 'GET',
+      headers: { Upgrade: 'websocket' },
+    }, env)
+
+    expect(res.status).toBe(401)
+  })
+
+  it('should require websocket upgrade after authentication', async () => {
+    const res = await app.request('/api/v1/ws', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(res.status).toBe(426)
+    const data = await res.json() as { success: boolean; error: string }
+    expect(data.success).toBe(false)
+    expect(data.error).toBe('Expected WebSocket upgrade')
   })
 })
 
@@ -609,6 +664,536 @@ describe('E2E: Web3 and IPFS Flow', () => {
     expect(data.success).toBe(true)
     expect(data.data?.txHash).toContain('0x')
     expect(data.data?.ipfsCid).toBeDefined()
+  })
+})
+
+describe('E2E: Incident Workflow', () => {
+  let env: Env
+  let authToken: string
+  let apiKey: string
+  let scalingPolicyId: string
+  let incidentId: string
+
+  beforeAll(async () => {
+    env = createTestEnv()
+
+    ;(env as Env & {
+      AI: { run: (model: string, input: unknown) => Promise<unknown> }
+    }).AI = {
+      run: async () => ({
+        response: JSON.stringify({
+          summary: 'CPU saturation on payments deployment',
+          severity: 'high',
+          likely_cause: 'Traffic spike exceeded current replica budget',
+          recommended_actions: ['Scale target workload using existing scaling policy'],
+        }),
+      }),
+    }
+
+    await app.request('/api/v1/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'incident-admin@example.com',
+        password: 'IncidentAdmin123!',
+        role: 'admin',
+      }),
+    }, env)
+
+    const loginRes = await app.request('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'incident-admin@example.com',
+        password: 'IncidentAdmin123!',
+      }),
+    }, env)
+
+    const loginData = await loginRes.json() as { data?: { access_token: string } }
+    authToken = loginData.data?.access_token || ''
+
+    const tokenRes = await app.request('/api/v1/users/me/tokens', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        name: 'incident-client',
+      }),
+    }, env)
+
+    const tokenData = await tokenRes.json() as { data?: { token: string } }
+    apiKey = tokenData.data?.token || ''
+
+    const policyRes = await app.request('/api/v1/scaling/policies', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        name: 'payments-policy',
+        targetType: 'deployment',
+        targetId: 'payments',
+        namespace: 'prod',
+        minReplicas: 1,
+        maxReplicas: 4,
+        metrics: [{ type: 'cpu', targetValue: 70 }],
+      }),
+    }, env)
+
+    const policyData = await policyRes.json() as { data?: { id: string } | { policy?: { id: string } }; policy?: { id: string } }
+    scalingPolicyId = (policyData.data as { id?: string; policy?: { id?: string } } | undefined)?.id
+      || (policyData.data as { policy?: { id?: string } } | undefined)?.policy?.id
+      || policyData.policy?.id
+      || ''
+  })
+
+  it('should create an incident with authenticated user context', async () => {
+    const res = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Payments deployment saturation',
+        source: 'alerts.cpu',
+        severity: 'high',
+        summary: 'CPU remained above threshold for 10 minutes',
+        action_type: 'scale_policy',
+        action_ref: scalingPolicyId,
+        evidence: [
+          {
+            type: 'alert',
+            source: 'prometheus',
+            content: 'payments deployment CPU > 90%',
+          },
+        ],
+      }),
+    }, env)
+
+    expect(res.status).toBe(201)
+    const data = await res.json() as { success: boolean; data?: { id: string; requested_via: string; status: string } }
+    expect(data.success).toBe(true)
+    expect(data.data?.requested_via).toBe('jwt')
+    expect(data.data?.status).toBe('open')
+    incidentId = data.data?.id || ''
+  })
+
+  it('should create an incident with API key auth', async () => {
+    const res = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey,
+      },
+      body: JSON.stringify({
+        title: 'Payments deployment saturation via API key',
+        source: 'alerts.cpu',
+        severity: 'medium',
+        action_type: 'scale_policy',
+        action_ref: scalingPolicyId,
+        evidence: [
+          {
+            type: 'alert',
+            source: 'prometheus',
+            content: 'API key initiated incident creation',
+          },
+        ],
+      }),
+    }, env)
+
+    expect(res.status).toBe(201)
+    const data = await res.json() as { success: boolean; data?: { requested_via: string } }
+    expect(data.success).toBe(true)
+    expect(data.data?.requested_via).toBe('api_key')
+  })
+
+  it('should analyze, approve, and execute the incident workflow', async () => {
+    const analyzeRes = await app.request(`/api/v1/incidents/${incidentId}/analyze`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(analyzeRes.status).toBe(200)
+    const analyzeData = await analyzeRes.json() as { success: boolean; data?: { status: string; analysis?: Record<string, unknown> } }
+    expect(analyzeData.success).toBe(true)
+    expect(analyzeData.data?.status).toBe('analyzed')
+    expect(analyzeData.data?.analysis).toBeDefined()
+
+    const approveRes = await app.request(`/api/v1/incidents/${incidentId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(approveRes.status).toBe(200)
+    const approveData = await approveRes.json() as { success: boolean; data?: { status: string } }
+    expect(approveData.data?.status).toBe('approved')
+
+    const executeRes = await app.request(`/api/v1/incidents/${incidentId}/execute`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect([200, 400]).toContain(executeRes.status)
+    const executeData = await executeRes.json() as { success: boolean; data?: { status: string; execution_id?: string } }
+    expect(executeData.success).toBe(true)
+    expect(['resolved', 'failed']).toContain(executeData.data?.status || '')
+  })
+
+  it('should list and fetch incidents', async () => {
+    const listRes = await app.request('/api/v1/incidents?severity=high', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(listRes.status).toBe(200)
+    const listData = await listRes.json() as { success: boolean; data?: { items?: Array<{ id: string }> } }
+    expect(listData.success).toBe(true)
+    expect((listData.data?.items || []).some((incident) => incident.id === incidentId)).toBe(true)
+
+    const getRes = await app.request(`/api/v1/incidents/${incidentId}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(getRes.status).toBe(200)
+    const getData = await getRes.json() as { success: boolean; data?: { id: string; recommendations: unknown[] } }
+    expect(getData.success).toBe(true)
+    expect(getData.data?.id).toBe(incidentId)
+    expect(Array.isArray(getData.data?.recommendations)).toBe(true)
+  })
+
+  it('should create, approve, and execute a restart deployment incident', async () => {
+    const createRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Restart payments deployment',
+        source: 'alerts.rollout',
+        severity: 'critical',
+        action_type: 'restart_deployment',
+        action_ref: 'default/anixops-api',
+        evidence: [
+          {
+            type: 'service',
+            source: 'kubernetes',
+            content: 'deployment rollout stalled',
+          },
+        ],
+      }),
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { data?: { id: string } }
+    const restartIncidentId = createData.data?.id || ''
+
+    const approveRes = await app.request(`/api/v1/incidents/${restartIncidentId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+    expect(approveRes.status).toBe(200)
+
+    const executeRes = await app.request(`/api/v1/incidents/${restartIncidentId}/execute`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(executeRes.status).toBe(200)
+    const executeData = await executeRes.json() as { success: boolean; data?: { status: string; execution_result?: { restarted?: boolean } } }
+    expect(executeData.success).toBe(true)
+    expect(executeData.data?.status).toBe('resolved')
+    expect(executeData.data?.execution_result?.success).toBe(true)
+    expect(executeData.data?.execution_result?.backend).toBe('kubernetes')
+  })
+  it('should enrich evidence automatically for restart deployment incidents', async () => {
+    const createRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Restart deployment with enrichment',
+        source: 'alerts.rollout',
+        severity: 'medium',
+        action_type: 'restart_deployment',
+        action_ref: 'default/anixops-api',
+        evidence: [
+          {
+            type: 'manual',
+            source: 'operator',
+            content: 'rollout observed as stuck',
+          },
+        ],
+      }),
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { success: boolean; data?: { evidence?: Array<{ source: string }> } }
+    expect(createData.success).toBe(true)
+    expect((createData.data?.evidence || []).some((item) => item.source === 'kubernetes.deployment')).toBe(true)
+    expect((createData.data?.evidence || []).some((item) => item.source === 'kubernetes.event')).toBe(true)
+  })
+
+  it('should enrich evidence automatically for task references', async () => {
+    await env.DB
+      .prepare(`
+        INSERT INTO tasks (task_id, playbook_id, playbook_name, status, trigger_type, triggered_by, target_nodes, variables)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .bind('task-e2e-1', 1, 'deploy-app', 'failed', 'manual', 1, '[]', '{}')
+      .run()
+
+    await env.DB
+      .prepare(`
+        INSERT INTO task_logs (task_id, node_id, node_name, level, message, metadata)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .bind('task-e2e-1', null, 'node-a', 'error', 'Task execution failed', JSON.stringify({ reason: 'timeout' }))
+      .run()
+
+    const createRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Task-linked incident',
+        source: 'task',
+        severity: 'high',
+        action_ref: 'task:task-e2e-1',
+      }),
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { success: boolean; data?: { evidence?: Array<{ source: string }> } }
+    expect(createData.success).toBe(true)
+    expect((createData.data?.evidence || []).some((item) => item.source === 'tasks.record')).toBe(true)
+    expect((createData.data?.evidence || []).some((item) => item.source === 'tasks.log')).toBe(true)
+  })
+
+  it('should enrich evidence automatically for node references', async () => {
+    const nodeRes = await app.request('/api/v1/nodes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        name: 'node-incident-evidence',
+        host: '10.0.0.11',
+        port: 22,
+      }),
+    }, env)
+
+    const nodeData = await nodeRes.json() as { data?: { id: number } }
+    await env.KV.put(`agent:latest:${nodeData.data?.id}`, JSON.stringify({ cpu_usage: 88, memory_usage: 79 }))
+
+    const createRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Node-linked incident',
+        source: 'node',
+        severity: 'medium',
+        action_ref: `node:${nodeData.data?.id}`,
+      }),
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { success: boolean; data?: { evidence?: Array<{ source: string }> } }
+    expect(createData.success).toBe(true)
+    expect((createData.data?.evidence || []).some((item) => item.source === 'nodes.record')).toBe(true)
+    expect((createData.data?.evidence || []).some((item) => item.source === 'nodes.latest_metrics')).toBe(true)
+  })
+
+  it('should reject operator approval for critical restart incidents', async () => {
+    await app.request('/api/v1/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'incident-operator-policy@example.com',
+        password: 'IncidentOperator123!',
+        role: 'operator',
+      }),
+    }, env)
+
+    const operatorLoginRes = await app.request('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'incident-operator-policy@example.com',
+        password: 'IncidentOperator123!',
+      }),
+    }, env)
+    const operatorLoginData = await operatorLoginRes.json() as { data?: { access_token: string } }
+    const operatorToken = operatorLoginData.data?.access_token || ''
+
+    const createRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Critical restart payments deployment',
+        source: 'alerts.rollout',
+        severity: 'critical',
+        action_type: 'restart_deployment',
+        action_ref: 'default/anixops-api',
+      }),
+    }, env)
+
+    const createData = await createRes.json() as { data?: { id: string } }
+    const approveRes = await app.request(`/api/v1/incidents/${createData.data?.id}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${operatorToken}` },
+    }, env)
+
+    expect(approveRes.status).toBe(403)
+  })
+
+  it('should reject operator approval for scale policy incidents', async () => {
+    const operatorLoginRes = await app.request('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'incident-operator-policy@example.com',
+        password: 'IncidentOperator123!',
+      }),
+    }, env)
+    const operatorLoginData = await operatorLoginRes.json() as { data?: { access_token: string } }
+    const operatorToken = operatorLoginData.data?.access_token || ''
+
+    const createRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Operator should not approve scale policy',
+        source: 'alerts.cpu',
+        severity: 'medium',
+        action_type: 'scale_policy',
+        action_ref: scalingPolicyId,
+      }),
+    }, env)
+
+    const createData = await createRes.json() as { data?: { id: string } }
+    const approveRes = await app.request(`/api/v1/incidents/${createData.data?.id}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${operatorToken}` },
+    }, env)
+
+    expect(approveRes.status).toBe(403)
+  })
+  it('should return incident summaries in list responses and details in item responses', async () => {
+    const createRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Summary/detail incident',
+        source: 'alerts.cpu',
+        severity: 'medium',
+        action_type: 'scale_policy',
+        action_ref: scalingPolicyId,
+      }),
+    }, env)
+
+    const createData = await createRes.json() as { data?: { id: string; correlation_id?: string } }
+    const incidentId = createData.data?.id || ''
+    const detailRes = await app.request(`/api/v1/incidents/${incidentId}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+    const detailForCorrelation = await detailRes.json() as { data?: { correlation_id?: string } }
+
+    const listRes = await app.request('/api/v1/incidents?correlation_id=' + encodeURIComponent(detailForCorrelation.data?.correlation_id || ''), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+    expect(listRes.status).toBe(200)
+    const listData = await listRes.json() as { data?: { items?: Array<Record<string, unknown>>; total?: number; page?: number; per_page?: number; total_pages?: number } }
+    const summary = (listData.data?.items || []).find(item => item.id === incidentId)
+    expect(listData.data?.page).toBe(1)
+    expect(listData.data?.per_page).toBe(20)
+    expect((listData.data?.total || 0)).toBeGreaterThan(0)
+    expect(summary).toBeDefined()
+    expect('evidence' in (summary || {})).toBe(false)
+    expect('analysis' in (summary || {})).toBe(false)
+
+    const incidentDetailRes = await app.request(`/api/v1/incidents/${incidentId}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+    expect(incidentDetailRes.status).toBe(200)
+    const detailData = await incidentDetailRes.json() as { data?: Record<string, unknown> }
+    expect(Array.isArray(detailData.data?.evidence)).toBe(true)
+    expect(Array.isArray(detailData.data?.recommendations)).toBe(true)
+  })
+
+  it('should expose structured links and query filters', async () => {
+    const createRes = await app.request('/api/v1/incidents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Linked scale incident',
+        source: 'alerts.cpu',
+        severity: 'medium',
+        action_type: 'scale_policy',
+        action_ref: scalingPolicyId,
+      }),
+    }, env)
+
+    expect(createRes.status).toBe(201)
+    const createData = await createRes.json() as { success: boolean; data?: { links?: Array<{ kind: string }> ; correlation_id?: string } }
+    expect(createData.success).toBe(true)
+    expect((createData.data?.links || []).some((link) => link.kind === 'scaling_policy')).toBe(true)
+
+    const filteredRes = await app.request('/api/v1/incidents?requested_via=jwt&source=alerts.cpu&has_action=true', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(filteredRes.status).toBe(200)
+    const filteredData = await filteredRes.json() as { success: boolean; data?: { items?: Array<{ source: string; requested_via: string; action_ref?: string }>; page?: number; per_page?: number } }
+    expect(filteredData.success).toBe(true)
+    expect(filteredData.data?.page).toBe(1)
+    expect((filteredData.data?.items || []).every((incident) => incident.source === 'alerts.cpu')).toBe(true)
+    expect((filteredData.data?.items || []).every((incident) => incident.requested_via === 'jwt')).toBe(true)
+    expect((filteredData.data?.items || []).every((incident) => !!incident.action_ref)).toBe(true)
+  })
+
+  it('should expose incident lifecycle events in realtime history', async () => {
+    const statusRes = await app.request('/api/v1/sse/status', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(statusRes.status).toBe(200)
+    const statusData = await statusRes.json() as {
+      success: boolean
+      data?: { stats?: { recent_events?: number }; connections?: unknown[] }
+    }
+    expect(statusData.success).toBe(true)
+    expect((statusData.data?.stats?.recent_events || 0)).toBeGreaterThan(0)
   })
 })
 

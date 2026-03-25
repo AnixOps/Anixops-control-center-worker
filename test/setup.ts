@@ -104,6 +104,7 @@ export function createMockD1(): D1Database {
   const playbooks: any[] = []
   const tasks: any[] = []
   const sessions: any[] = []
+  const apiTokens: any[] = []
   const auditLogs: any[] = []
   const notifications: any[] = []
   const userMfa: any[] = []
@@ -113,6 +114,7 @@ export function createMockD1(): D1Database {
   const permissions: any[] = []
   const tenantInvitations: any[] = []
   const taskLogs: any[] = []
+  const incidents: any[] = []
   let idCounter = 1
 
   return {
@@ -190,7 +192,8 @@ export function createMockD1(): D1Database {
 
           // Node queries
           if (sqlLower.includes('from nodes where id')) {
-            return nodes.find(n => n.id === bindings[0]) || null
+            const id = typeof bindings[0] === 'string' ? parseInt(bindings[0], 10) : bindings[0]
+            return nodes.find(n => n.id === id) || null
           }
           if (sqlLower.includes('select id from nodes where name')) {
             return nodes.find(n => n.name === bindings[0]) || null
@@ -204,7 +207,52 @@ export function createMockD1(): D1Database {
             return playbooks.find(p => p.id === bindings[0]) || null
           }
 
-          // Count queries
+          // Task queries
+          if (sqlLower.includes('from tasks') && (sqlLower.includes('where t.task_id') || sqlLower.includes('where task_id'))) {
+            const taskId = bindings[0]
+            return tasks.find(t => t.task_id === taskId || t.id === taskId) || null
+          }
+
+          // Incident queries
+          if (sqlLower.includes('from incidents where id')) {
+            return incidents.find(i => i.id === bindings[0]) || null
+          }
+
+          // Count queries for incidents
+          if (sqlLower.includes('count(') && sqlLower.includes('from incidents')) {
+            let filtered = [...incidents]
+            let idx = 0
+            if (sqlLower.includes('status = ?')) {
+              filtered = filtered.filter(item => item.status === bindings[idx++])
+            }
+            if (sqlLower.includes('severity = ?')) {
+              filtered = filtered.filter(item => item.severity === bindings[idx++])
+            }
+            if (sqlLower.includes('action_type = ?')) {
+              filtered = filtered.filter(item => item.action_type === bindings[idx++])
+            }
+            if (sqlLower.includes('source = ?')) {
+              filtered = filtered.filter(item => item.source === bindings[idx++])
+            }
+            if (sqlLower.includes('requested_via = ?')) {
+              filtered = filtered.filter(item => item.requested_via === bindings[idx++])
+            }
+            if (sqlLower.includes('approved_by = ?')) {
+              filtered = filtered.filter(item => item.approved_by === bindings[idx++])
+            }
+            if (sqlLower.includes('correlation_id = ?')) {
+              filtered = filtered.filter(item => item.correlation_id === bindings[idx++])
+            }
+            if (sqlLower.includes('action_type is not null and action_ref is not null')) {
+              filtered = filtered.filter(item => item.action_type && item.action_ref)
+            }
+            if (sqlLower.includes('(action_type is null or action_ref is null)')) {
+              filtered = filtered.filter(item => !item.action_type || !item.action_ref)
+            }
+            return { count: filtered.length, total: filtered.length }
+          }
+
+          // Count queries (generic)
           if (sqlLower.includes('count(')) {
             return { count: 1, total: 1 }
           }
@@ -291,50 +339,152 @@ export function createMockD1(): D1Database {
             return invitation
           }
 
-          // Permission queries
-          if (sqlLower.includes('from permissions')) {
-            return { results: permissions }
+          // API token queries
+          if (sqlLower.includes('insert into api_tokens') && sqlLower.includes('returning')) {
+            const token = {
+              id: idCounter++,
+              user_id: bindings[0],
+              name: bindings[1],
+              token_hash: bindings[2],
+              created_at: new Date().toISOString(),
+              last_used: null,
+              expires_at: bindings[3] || null,
+            }
+            apiTokens.push(token)
+            return { id: token.id, name: token.name, created_at: token.created_at, expires_at: token.expires_at }
+          }
+          if (sqlLower.includes('delete from api_tokens') && sqlLower.includes('returning')) {
+            const idx = apiTokens.findIndex(t => t.id === bindings[0] && t.user_id === bindings[1])
+            if (idx < 0) return null
+            const [removed] = apiTokens.splice(idx, 1)
+            return { id: removed.id, name: removed.name }
+          }
+          if (sqlLower.includes('update api_tokens set last_used')) {
+            const token = apiTokens.find(t => t.id === bindings[0] || t.token_hash === bindings[0])
+            if (token) token.last_used = new Date().toISOString()
+            return { success: true }
+          }
+          if (sqlLower.includes('from api_tokens')) {
+            return { results: apiTokens }
+          }
+          if (sqlLower.includes('select u.id, u.email, u.role, t.id as token_id, t.name as token_name')) {
+            const token = apiTokens.find(t => t.token_hash === bindings[0])
+            if (!token) return null
+            const user = users.find(u => u.id === token.user_id)
+            if (!user) return null
+            return {
+              token_id: token.id,
+              token_name: token.name,
+              token_hash: token.token_hash,
+              user_id: token.user_id,
+              email: user.email,
+              role: user.role,
+            }
           }
 
-          return null
+          // Permission queries
         }),
         all: vi.fn(async function(this: any) {
-          const sqlLower = this._sqlLower || ''
+          const normalizedSql = this._sqlLower || sqlLower
 
-          if (sqlLower.includes('from users')) {
+          if (normalizedSql.includes('from incidents')) {
+            let results = [...incidents]
+            const bindings = this._bindings || []
+            let index = 0
+
+            if (normalizedSql.includes('status = ?')) {
+              results = results.filter(item => item.status === bindings[index++])
+            }
+            if (normalizedSql.includes('severity = ?')) {
+              results = results.filter(item => item.severity === bindings[index++])
+            }
+            if (normalizedSql.includes('action_type = ?')) {
+              results = results.filter(item => item.action_type === bindings[index++])
+            }
+            if (normalizedSql.includes('source = ?')) {
+              results = results.filter(item => item.source === bindings[index++])
+            }
+            if (normalizedSql.includes('requested_via = ?')) {
+              results = results.filter(item => item.requested_via === bindings[index++])
+            }
+            if (normalizedSql.includes('approved_by = ?')) {
+              results = results.filter(item => item.approved_by === bindings[index++])
+            }
+            if (normalizedSql.includes('correlation_id = ?')) {
+              results = results.filter(item => item.correlation_id === bindings[index++])
+            }
+            if (normalizedSql.includes('action_type is not null and action_ref is not null')) {
+              results = results.filter(item => item.action_type && item.action_ref)
+            }
+            if (normalizedSql.includes('(action_type is null or action_ref is null)')) {
+              results = results.filter(item => !item.action_type || !item.action_ref)
+            }
+
+            return { results }
+          }
+          if (normalizedSql.includes('from api_tokens') && normalizedSql.includes('join users')) {
+            const results = apiTokens
+              .map((token) => {
+                const user = users.find(u => u.id === token.user_id)
+                if (!user) return null
+                return {
+                  token_id: token.id,
+                  token_name: token.name,
+                  token_hash: token.token_hash,
+                  user_id: token.user_id,
+                  email: user.email,
+                  role: user.role,
+                }
+              })
+              .filter(Boolean)
+            return { results }
+          }
+          if (normalizedSql.includes('from users')) {
             return { results: users }
           }
-          if (sqlLower.includes('from nodes')) {
+          if (normalizedSql.includes('from nodes')) {
             return { results: nodes }
           }
-          if (sqlLower.includes('from playbooks')) {
+          if (normalizedSql.includes('from playbooks')) {
             return { results: playbooks }
           }
-          if (sqlLower.includes('from tasks')) {
+          if (normalizedSql.includes('from tasks')) {
+            const bindings = this._bindings || []
+            if (bindings.length > 0) {
+              const taskId = bindings[0]
+              return { results: tasks.filter(t => t.task_id === taskId || t.id === taskId) }
+            }
             return { results: tasks }
           }
-          if (sqlLower.includes('from notifications')) {
+          if (normalizedSql.includes('from notifications')) {
             return { results: notifications }
           }
-          if (sqlLower.includes('from audit_logs')) {
+          if (normalizedSql.includes('from audit_logs')) {
             return { results: auditLogs }
           }
-          if (sqlLower.includes('from tenants')) {
+          if (normalizedSql.includes('from tenants')) {
             return { results: tenants }
           }
-          if (sqlLower.includes('from tenant_members')) {
+          if (normalizedSql.includes('from tenant_members')) {
             return { results: tenantMembers }
           }
-          if (sqlLower.includes('from roles')) {
+          if (normalizedSql.includes('from roles')) {
             return { results: roles }
           }
-          if (sqlLower.includes('from permissions')) {
+          if (normalizedSql.includes('from permissions')) {
             return { results: permissions }
           }
-          if (sqlLower.includes('from tenant_invitations')) {
+          if (normalizedSql.includes('from tenant_invitations')) {
             return { results: tenantInvitations }
           }
-          if (sqlLower.includes('from task_logs')) {
+          if (normalizedSql.includes('from api_tokens')) {
+            return { results: apiTokens }
+          }
+          if (normalizedSql.includes('from task_logs')) {
+            const bindings = this._bindings || []
+            if (bindings.length > 0) {
+              return { results: taskLogs.filter(log => log.task_id === bindings[0]) }
+            }
             return { results: taskLogs }
           }
 
@@ -343,6 +493,56 @@ export function createMockD1(): D1Database {
         run: vi.fn(async function(this: any) {
           const sqlLower = this._sqlLower || ''
           const bindings = this._bindings || []
+
+          // INSERT task
+          if (sqlLower.includes('insert into tasks')) {
+            const task = {
+              id: idCounter++,
+              task_id: bindings[0],
+              playbook_id: bindings[1],
+              playbook_name: bindings[2],
+              status: bindings[3] || 'pending',
+              trigger_type: bindings[4] || 'manual',
+              triggered_by: bindings[5] || null,
+              target_nodes: bindings[6] || '[]',
+              variables: bindings[7] || '{}',
+              created_at: new Date().toISOString(),
+            }
+            tasks.push(task)
+            return { success: true, results: [task], meta: { last_row_id: task.id } }
+          }
+
+          // INSERT incident
+          if (sqlLower.includes('insert or replace into incidents')) {
+            const incident = {
+              id: bindings[0],
+              title: bindings[1],
+              summary: bindings[2],
+              status: bindings[3],
+              severity: bindings[4],
+              source: bindings[5],
+              correlation_id: bindings[6],
+              requested_by: bindings[7],
+              requested_by_email: bindings[8],
+              requested_via: bindings[9],
+              approved_by: bindings[10],
+              approved_at: bindings[11],
+              execution_id: bindings[12],
+              action_type: bindings[13],
+              action_ref: bindings[14],
+              evidence: bindings[15],
+              recommendations: bindings[16],
+              links: bindings[17],
+              analysis: bindings[18],
+              execution_result: bindings[19],
+              created_at: bindings[20],
+              updated_at: bindings[21],
+            }
+            const idx = incidents.findIndex(item => item.id === incident.id)
+            if (idx >= 0) incidents[idx] = incident
+            else incidents.push(incident)
+            return { success: true, meta: { changes: 1 } }
+          }
 
           // INSERT user
           if (sqlLower.includes('insert into users')) {

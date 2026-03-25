@@ -11,6 +11,7 @@
 
 import type { Context } from 'hono'
 import type { Env } from '../types'
+import { buildChannels, makeRealtimeEvent, publishRealtimeEvent } from '../services/realtime'
 
 // Audit log entry
 export interface AuditEntry {
@@ -147,6 +148,29 @@ export async function logAudit(
       details: JSON.stringify(enrichedDetails),
       created_at: new Date().toISOString(),
     })
+
+    publishRealtimeEvent(makeRealtimeEvent(
+      `audit.${action}`,
+      'audit',
+      buildChannels(
+        'global',
+        'audit',
+        'operations',
+        tenantId ? `tenant:${tenantId}` : undefined,
+        userId ? `user:${userId}` : undefined,
+      ),
+      {
+        audit_id: result?.id || 0,
+        action,
+        resource,
+        status,
+        details: enrichedDetails,
+      },
+      {
+        user_id: userId,
+        tenant_id: tenantId || undefined,
+      }
+    ))
 
     return result?.id || 0
   } catch (err) {

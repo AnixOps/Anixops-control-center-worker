@@ -50,6 +50,13 @@ export interface JWTPayload {
   exp: number
 }
 
+export interface AuthPrincipal extends JWTPayload {
+  kind: 'user' | 'api_key'
+  auth_method: 'jwt' | 'api_key'
+  token_id?: number
+  token_name?: string
+}
+
 // 节点类型
 export interface Node {
   id: number
@@ -189,6 +196,260 @@ export interface AuditLog {
   created_at: string
 }
 
+// Incident workflow types
+export type IncidentSeverity = 'low' | 'medium' | 'high' | 'critical'
+export type IncidentStatus = 'open' | 'analyzed' | 'approved' | 'executing' | 'resolved' | 'failed'
+export type IncidentActionType = 'scale_policy' | 'restart_deployment'
+
+export interface IncidentEvidence {
+  type: 'log' | 'metric' | 'task' | 'node' | 'alert' | 'service' | 'manual'
+  source: string
+  content: string
+}
+
+export interface IncidentRecommendation {
+  id: string
+  title: string
+  description: string
+  action_type?: IncidentActionType
+  action_ref?: string
+  confidence?: number
+}
+
+export interface IncidentLink {
+  kind: 'task' | 'node' | 'scaling_policy' | 'deployment'
+  id: string
+  name?: string
+  href?: string
+}
+
+export interface IncidentExecutionResult {
+  backend: 'autoscaling' | 'kubernetes'
+  success: boolean
+  message?: string
+  operation?: string
+  target?: {
+    kind: 'scaling_policy' | 'deployment'
+    id: string
+    name?: string
+    namespace?: string
+  }
+  details?: Record<string, unknown>
+}
+
+export interface IncidentSummary {
+  id: string
+  title: string
+  summary?: string
+  status: IncidentStatus
+  severity: IncidentSeverity
+  source: string
+  requested_via: 'jwt' | 'api_key'
+  action_type?: IncidentActionType
+  action_ref?: string
+  approved_by?: number
+  correlation_id: string
+  links?: IncidentLink[]
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface IncidentDetail extends IncidentSummary {
+  requested_by: number
+  requested_by_email?: string
+  approved_at?: string
+  execution_id?: string
+  evidence: IncidentEvidence[]
+  recommendations: IncidentRecommendation[]
+  analysis?: Record<string, unknown>
+  execution_result?: IncidentExecutionResult
+}
+
+export interface IncidentRecord {
+  id: string
+  title: string
+  summary?: string
+  status: IncidentStatus
+  severity: IncidentSeverity
+  source: string
+  correlation_id: string
+  requested_by: number
+  requested_by_email?: string
+  requested_via: 'jwt' | 'api_key'
+  approved_by?: number
+  approved_at?: string
+  execution_id?: string
+  action_type?: IncidentActionType
+  action_ref?: string
+  evidence: IncidentEvidence[]
+  recommendations: IncidentRecommendation[]
+  links?: IncidentLink[]
+  analysis?: Record<string, unknown>
+  execution_result?: IncidentExecutionResult
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export type IncidentTimelineEventType =
+  | 'created'
+  | 'analyzed'
+  | 'approved'
+  | 'executing'
+  | 'resolved'
+  | 'failed'
+  | 'evidence_added'
+  | 'comment'
+
+export interface IncidentTimelineEvent {
+  id: string
+  incident_id: string
+  type: IncidentTimelineEventType
+  timestamp: string
+  actor?: {
+    user_id: number
+    email?: string
+    role?: string
+  }
+  summary: string
+  details?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
+
+export interface IncidentTimeline {
+  incident_id: string
+  correlation_id: string
+  events: IncidentTimelineEvent[]
+  total_events: number
+}
+
+// Incident Comment types
+export interface IncidentComment {
+  id: string
+  incident_id: string
+  author_id: number
+  author_email?: string
+  author_role?: string
+  content: string
+  visibility: 'public' | 'internal'
+  created_at: string
+  updated_at: string
+}
+
+export interface IncidentCommentInput {
+  content: string
+  visibility?: 'public' | 'internal'
+}
+
+// Governance Policy types
+export interface GovernancePolicyRule {
+  id: string
+  name: string
+  description?: string
+  enabled: boolean
+  conditions: {
+    severity?: IncidentSeverity[]
+    action_types?: IncidentActionType[]
+    sources?: string[]
+  }
+  effect: 'allow' | 'deny'
+  principals: {
+    roles?: ('admin' | 'operator' | 'viewer')[]
+    user_ids?: number[]
+  }
+  priority: number
+  created_at: string
+  updated_at: string
+}
+
+export interface GovernancePolicy {
+  id: string
+  name: string
+  description?: string
+  version: number
+  enabled: boolean
+  default_effect: 'allow' | 'deny'
+  rules: GovernancePolicyRule[]
+  created_by: number
+  created_at: string
+  updated_at: string
+}
+
+export interface GovernanceEvaluation {
+  allowed: boolean
+  matched_rules: string[]
+  evaluation_time: string
+  policy_id: string
+  policy_version: number
+}
+
+// Webhook types
+export type WebhookEventType =
+  | 'incident.created'
+  | 'incident.analyzed'
+  | 'incident.approved'
+  | 'incident.executing'
+  | 'incident.resolved'
+  | 'incident.failed'
+
+export interface WebhookEndpoint {
+  id: string
+  name: string
+  url: string
+  secret?: string
+  events: WebhookEventType[]
+  enabled: boolean
+  headers?: Record<string, string>
+  created_by: number
+  created_at: string
+  updated_at: string
+}
+
+export interface WebhookDelivery {
+  id: string
+  webhook_id: string
+  event_type: WebhookEventType
+  payload: Record<string, unknown>
+  response_status?: number
+  response_body?: string
+  delivered_at?: string
+  attempts: number
+  last_attempt_at?: string
+  success: boolean
+  created_at: string
+}
+
+// Realtime event types
+export type RealtimeScope = 'global' | 'tenant' | 'user' | 'node' | 'task' | 'audit' | 'incident' | 'system'
+
+export interface RealtimeActor {
+  user_id: number
+  email: string
+  role: string
+}
+
+export interface RealtimeResource {
+  kind: 'node' | 'task' | 'notification' | 'audit' | 'agent' | 'incident' | 'system' | 'user'
+  id: string | number
+  name?: string
+}
+
+export interface RealtimeEvent<T = unknown> {
+  id: string
+  type: string
+  scope: RealtimeScope
+  channels: string[]
+  payload: T
+  timestamp: string
+  version: number
+  tenant_id?: number
+  user_id?: number
+  resource?: RealtimeResource
+  actor?: RealtimeActor
+  correlation_id?: string
+}
+
 // API 响应类型
 export interface ApiResponse<T = unknown> {
   success: boolean
@@ -209,6 +470,6 @@ export interface PaginatedResponse<T> {
 // Hono 上下文变量
 declare module 'hono' {
   interface ContextVariableMap {
-    user: JWTPayload
+    user: AuthPrincipal
   }
 }

@@ -20,6 +20,45 @@ import { listSchedulesHandler, getScheduleHandler, createScheduleHandler, update
 import { listNodeGroupsHandler, getNodeGroupHandler, createNodeGroupHandler, updateNodeGroupHandler, deleteNodeGroupHandler, addNodesToGroupHandler, removeNodesFromGroupHandler } from './handlers/node-groups'
 import { sseHandler, sseSubscribeHandler, sseUnsubscribeHandler, sseStatusHandler } from './handlers/sse'
 import { websocketHandler } from './handlers/websocket'
+import {
+  listIncidentsHandler,
+  getIncidentHandler,
+  createIncidentHandler,
+  analyzeIncidentHandler,
+  approveIncidentHandler,
+  executeIncidentHandler,
+  getIncidentTimelineHandler,
+  getIncidentStatisticsHandler,
+  searchIncidentsHandler,
+  listIncidentCommentsHandler,
+  addIncidentCommentHandler,
+  updateIncidentCommentHandler,
+  deleteIncidentCommentHandler,
+  bulkApproveIncidentsHandler,
+  bulkExecuteIncidentsHandler,
+  bulkAnalyzeIncidentsHandler,
+  bulkDeleteIncidentsHandler,
+  listTagsHandler,
+  addTagsHandler,
+  removeTagsHandler,
+  setTagsHandler,
+} from './handlers/incidents'
+import {
+  listPoliciesHandler,
+  getPolicyHandler,
+  getActivePolicyHandler,
+  createPolicyHandler,
+  updatePolicyHandler,
+  deletePolicyHandler,
+} from './handlers/governance'
+import {
+  listWebhooksHandler,
+  getWebhookHandler,
+  createWebhookHandler,
+  updateWebhookHandler,
+  deleteWebhookHandler,
+  listWebhookDeliveriesHandler,
+} from './handlers/webhooks'
 import { createBackupHandler, listBackupsHandler, getBackupHandler, deleteBackupHandler, downloadBackupHandler, restoreBackupHandler, cleanupBackupsHandler, backupStatusHandler } from './handlers/backup'
 
 // AI Services
@@ -281,6 +320,50 @@ app.post('/api/v1/notifications', authMiddleware, rbacMiddleware(['admin', 'oper
 app.put('/api/v1/notifications/:id/read', authMiddleware, markNotificationReadHandler)
 app.put('/api/v1/notifications/read-all', authMiddleware, markAllNotificationsReadHandler)
 app.delete('/api/v1/notifications/:id', authMiddleware, deleteNotificationHandler)
+
+// Incident workflows
+app.get('/api/v1/incidents', authMiddleware, listIncidentsHandler)
+app.post('/api/v1/incidents', authMiddleware, createIncidentHandler)
+app.get('/api/v1/incidents/statistics', authMiddleware, getIncidentStatisticsHandler)
+app.get('/api/v1/incidents/search', authMiddleware, searchIncidentsHandler)
+
+// Bulk incident operations (must come before :id routes)
+app.post('/api/v1/incidents/bulk/analyze', authMiddleware, rbacMiddleware(['admin', 'operator']), bulkAnalyzeIncidentsHandler)
+app.post('/api/v1/incidents/bulk/approve', authMiddleware, rbacMiddleware(['admin', 'operator']), bulkApproveIncidentsHandler)
+app.post('/api/v1/incidents/bulk/execute', authMiddleware, rbacMiddleware(['admin', 'operator']), bulkExecuteIncidentsHandler)
+app.post('/api/v1/incidents/bulk/delete', authMiddleware, rbacMiddleware(['admin']), bulkDeleteIncidentsHandler)
+
+app.get('/api/v1/incidents/:id', authMiddleware, getIncidentHandler)
+app.get('/api/v1/incidents/:id/timeline', authMiddleware, getIncidentTimelineHandler)
+app.get('/api/v1/incidents/:id/comments', authMiddleware, listIncidentCommentsHandler)
+app.post('/api/v1/incidents/:id/comments', authMiddleware, addIncidentCommentHandler)
+app.put('/api/v1/incidents/:id/comments/:commentId', authMiddleware, updateIncidentCommentHandler)
+app.delete('/api/v1/incidents/:id/comments/:commentId', authMiddleware, deleteIncidentCommentHandler)
+app.post('/api/v1/incidents/:id/analyze', authMiddleware, rbacMiddleware(['admin', 'operator']), analyzeIncidentHandler)
+app.post('/api/v1/incidents/:id/approve', authMiddleware, rbacMiddleware(['admin', 'operator']), approveIncidentHandler)
+app.post('/api/v1/incidents/:id/execute', authMiddleware, rbacMiddleware(['admin', 'operator']), executeIncidentHandler)
+
+// Incident tags
+app.get('/api/v1/incidents/tags', authMiddleware, listTagsHandler)
+app.post('/api/v1/incidents/:id/tags', authMiddleware, addTagsHandler)
+app.delete('/api/v1/incidents/:id/tags', authMiddleware, removeTagsHandler)
+app.put('/api/v1/incidents/:id/tags', authMiddleware, setTagsHandler)
+
+// Governance policies
+app.get('/api/v1/governance/policies', authMiddleware, rbacMiddleware(['admin']), listPoliciesHandler)
+app.get('/api/v1/governance/policies/active', authMiddleware, getActivePolicyHandler)
+app.get('/api/v1/governance/policies/:id', authMiddleware, rbacMiddleware(['admin']), getPolicyHandler)
+app.post('/api/v1/governance/policies', authMiddleware, rbacMiddleware(['admin']), createPolicyHandler)
+app.put('/api/v1/governance/policies/:id', authMiddleware, rbacMiddleware(['admin']), updatePolicyHandler)
+app.delete('/api/v1/governance/policies/:id', authMiddleware, rbacMiddleware(['admin']), deletePolicyHandler)
+
+// Webhooks
+app.get('/api/v1/webhooks', authMiddleware, rbacMiddleware(['admin']), listWebhooksHandler)
+app.post('/api/v1/webhooks', authMiddleware, rbacMiddleware(['admin']), createWebhookHandler)
+app.get('/api/v1/webhooks/:id', authMiddleware, rbacMiddleware(['admin']), getWebhookHandler)
+app.put('/api/v1/webhooks/:id', authMiddleware, rbacMiddleware(['admin']), updateWebhookHandler)
+app.delete('/api/v1/webhooks/:id', authMiddleware, rbacMiddleware(['admin']), deleteWebhookHandler)
+app.get('/api/v1/webhooks/:id/deliveries', authMiddleware, rbacMiddleware(['admin']), listWebhookDeliveriesHandler)
 
 // ==================== SSE (实时通信) ====================
 app.get('/api/v1/sse', authMiddleware, sseHandler)
