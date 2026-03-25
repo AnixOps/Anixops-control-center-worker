@@ -165,6 +165,33 @@ function generateSignature(secret: string, payload: string): string {
   return Math.abs(hash).toString(16).padStart(64, '0')
 }
 
+async function generateHmacSignature(secret: string, payload: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const keyData = encoder.encode(secret)
+  const messageData = encoder.encode(payload)
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+
+  const signature = await crypto.subtle.sign('HMAC', key, messageData)
+  const hashArray = Array.from(new Uint8Array(signature))
+  return 'sha256=' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+const MAX_RETRIES = 3
+const RETRY_DELAYS_MS = [1000, 5000, 15000] // 1s, 5s, 15s
+
+interface DeliveryAttempt {
+  timestamp: string
+  status?: number
+  error?: string
+}
+
 async function deliverWebhook(
   env: Env,
   webhook: WebhookEndpoint,
@@ -198,30 +225,73 @@ async function deliverWebhook(
   }
 
   if (webhook.secret) {
-    headers['X-Webhook-Signature'] = generateSignature(webhook.secret, body)
+    headers['X-Webhook-Signature'] = await generateHmacSignature(webhook.secret, body)
+    // Also include legacy signature for backwards compatibility
+    headers['X-Webhook-Signature-Legacy'] = generateSignature(webhook.secret, body)
   }
 
-  try {
-    const response = await fetch(webhook.url, {
-      method: 'POST',
-      headers,
-      body,
-    })
+  const attempts: DeliveryAttempt[] = []
 
-    delivery.response_status = response.status
-    delivery.response_body = await response.text().then(t => t.substring(0, 1000)).catch(() => '')
-    delivery.success = response.status >= 200 && response.status < 300
-    delivery.delivered_at = nowIso()
-  } catch (err) {
-    delivery.response_body = err instanceof Error ? err.message : 'Unknown error'
-    delivery.success = false
-  } finally {
-    delivery.attempts = 1
-    delivery.last_attempt_at = nowIso()
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const attemptTime = nowIso()
+    delivery.attempts = attempt + 1
+    delivery.last_attempt_at = attemptTime
+
+    try {
+      const response = await fetch(webhook.url, {
+        method: 'POST',
+        headers,
+        body,
+        signal: AbortSignal.timeout(10000), // 10s timeout
+      })
+
+      delivery.response_status = response.status
+      delivery.response_body = await response.text().then(t => t.substring(0, 1000)).catch(() => '')
+
+      attempts.push({
+        timestamp: attemptTime,
+        status: response.status,
+      })
+
+      if (response.status >= 200 && response.status < 300) {
+        delivery.success = true
+        delivery.delivered_at = attemptTime
+        break
+      }
+
+      // Non-2xx response - retry for 5xx errors
+      if (response.status < 500 && response.status !== 429) {
+        // Client error - don't retry
+        break
+      }
+
+      // Wait before retry (except on last attempt)
+      if (attempt < MAX_RETRIES - 1) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS_MS[attempt]))
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+      delivery.response_body = errorMessage
+
+      attempts.push({
+        timestamp: attemptTime,
+        error: errorMessage,
+      })
+
+      // Wait before retry (except on last attempt)
+      if (attempt < MAX_RETRIES - 1) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS_MS[attempt]))
+      }
+    }
   }
 
-  // Store delivery record
-  await env.KV.put(deliveryKey(deliveryId), JSON.stringify(delivery), { expirationTtl: 86400 * 7 })
+  // Store delivery record with attempt history
+  const deliveryWithAttempts = {
+    ...delivery,
+    _attempts: attempts,
+  }
+
+  await env.KV.put(deliveryKey(deliveryId), JSON.stringify(deliveryWithAttempts), { expirationTtl: 86400 * 7 })
 
   // Add to delivery index
   const indexKey = deliveryIndexKey(webhook.id)
@@ -262,4 +332,57 @@ export async function triggerWebhooks(
   )
 
   return deliveries
+}
+
+export async function retryDelivery(
+  env: Env,
+  deliveryId: string
+): Promise<WebhookDelivery | null> {
+  const delivery = await getDelivery(env, deliveryId)
+  if (!delivery || delivery.success) {
+    return null
+  }
+
+  const webhook = await getWebhook(env, delivery.webhook_id)
+  if (!webhook || !webhook.enabled) {
+    return null
+  }
+
+  // Redeliver with the same payload
+  const newDelivery = await deliverWebhook(
+    env,
+    webhook,
+    delivery.event_type,
+    delivery.payload
+  )
+
+  return newDelivery
+}
+
+export async function listFailedDeliveries(env: Env): Promise<WebhookDelivery[]> {
+  const webhooks = await listWebhooks(env)
+  const failedDeliveries: WebhookDelivery[] = []
+
+  for (const webhook of webhooks) {
+    const deliveries = await listDeliveries(env, webhook.id)
+    for (const delivery of deliveries) {
+      if (!delivery.success) {
+        failedDeliveries.push(delivery)
+      }
+    }
+  }
+
+  return failedDeliveries.sort((a, b) =>
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  )
+}
+
+export function verifySignature(
+  secret: string,
+  payload: string,
+  signature: string
+): Promise<boolean> {
+  return generateHmacSignature(secret, payload).then(
+    computed => computed === signature
+  )
 }

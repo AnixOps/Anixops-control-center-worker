@@ -58,6 +58,8 @@ import {
   updateWebhookHandler,
   deleteWebhookHandler,
   listWebhookDeliveriesHandler,
+  retryDeliveryHandler,
+  listFailedDeliveriesHandler,
 } from './handlers/webhooks'
 import { createBackupHandler, listBackupsHandler, getBackupHandler, deleteBackupHandler, downloadBackupHandler, restoreBackupHandler, cleanupBackupsHandler, backupStatusHandler } from './handlers/backup'
 
@@ -360,10 +362,12 @@ app.delete('/api/v1/governance/policies/:id', authMiddleware, rbacMiddleware(['a
 // Webhooks
 app.get('/api/v1/webhooks', authMiddleware, rbacMiddleware(['admin']), listWebhooksHandler)
 app.post('/api/v1/webhooks', authMiddleware, rbacMiddleware(['admin']), createWebhookHandler)
+app.get('/api/v1/webhooks/failed-deliveries', authMiddleware, rbacMiddleware(['admin']), listFailedDeliveriesHandler)
 app.get('/api/v1/webhooks/:id', authMiddleware, rbacMiddleware(['admin']), getWebhookHandler)
 app.put('/api/v1/webhooks/:id', authMiddleware, rbacMiddleware(['admin']), updateWebhookHandler)
 app.delete('/api/v1/webhooks/:id', authMiddleware, rbacMiddleware(['admin']), deleteWebhookHandler)
 app.get('/api/v1/webhooks/:id/deliveries', authMiddleware, rbacMiddleware(['admin']), listWebhookDeliveriesHandler)
+app.post('/api/v1/webhooks/deliveries/:deliveryId/retry', authMiddleware, rbacMiddleware(['admin']), retryDeliveryHandler)
 
 // ==================== SSE (实时通信) ====================
 app.get('/api/v1/sse', authMiddleware, sseHandler)

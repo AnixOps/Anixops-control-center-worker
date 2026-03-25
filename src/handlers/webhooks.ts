@@ -7,7 +7,9 @@ import {
   deleteWebhook,
   getWebhook,
   listDeliveries,
+  listFailedDeliveries,
   listWebhooks,
+  retryDelivery,
   type CreateWebhookInput,
   updateWebhook,
   type UpdateWebhookInput,
@@ -172,6 +174,54 @@ export async function listWebhookDeliveriesHandler(c: Context<{ Bindings: Env }>
       response_status: d.response_status,
       attempts: d.attempts,
       delivered_at: d.delivered_at,
+      created_at: d.created_at,
+    })),
+  })
+}
+
+export async function retryDeliveryHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const deliveryId = c.req.param('deliveryId') as string
+
+  const delivery = await retryDelivery(c.env, deliveryId)
+
+  if (!delivery) {
+    return c.json({ success: false, error: 'Delivery not found, already succeeded, or webhook disabled' }, 404)
+  }
+
+  await logAudit(c, principal.sub, 'retry_webhook_delivery', 'webhook', {
+    delivery_id: deliveryId,
+    new_delivery_id: delivery.id,
+    success: delivery.success,
+  })
+
+  return c.json({
+    success: true,
+    data: {
+      id: delivery.id,
+      event_type: delivery.event_type,
+      success: delivery.success,
+      response_status: delivery.response_status,
+      attempts: delivery.attempts,
+      delivered_at: delivery.delivered_at,
+    },
+  })
+}
+
+export async function listFailedDeliveriesHandler(c: Context<{ Bindings: Env }>) {
+  const failedDeliveries = await listFailedDeliveries(c.env)
+
+  return c.json({
+    success: true,
+    data: failedDeliveries.map(d => ({
+      id: d.id,
+      webhook_id: d.webhook_id,
+      event_type: d.event_type,
+      success: d.success,
+      response_status: d.response_status,
+      response_body: d.response_body,
+      attempts: d.attempts,
+      last_attempt_at: d.last_attempt_at,
       created_at: d.created_at,
     })),
   })
