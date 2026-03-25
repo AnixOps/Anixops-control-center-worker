@@ -1628,3 +1628,159 @@ export async function listAllTags(env: Env): Promise<Array<{ tag: string; count:
     .map(([tag, count]) => ({ tag, count }))
     .sort((a, b) => b.count - a.count)
 }
+
+// SLA thresholds in minutes for each severity
+const SLA_THRESHOLDS: Record<IncidentSeverity, { acknowledge: number; resolve: number }> = {
+  critical: { acknowledge: 15, resolve: 60 },
+  high: { acknowledge: 30, resolve: 240 },
+  medium: { acknowledge: 60, resolve: 480 },
+  low: { acknowledge: 240, resolve: 1440 },
+}
+
+export function calculateSlaDeadline(
+  severity: IncidentSeverity,
+  createdAt: string
+): string {
+  const thresholds = SLA_THRESHOLDS[severity]
+  const created = new Date(createdAt)
+  const deadline = new Date(created.getTime() + thresholds.resolve * 60 * 1000)
+  return deadline.toISOString()
+}
+
+export async function acknowledgeIncident(
+  env: Env,
+  incident: IncidentRecord,
+  principal: AuthPrincipal
+): Promise<IncidentRecord> {
+  if (incident.status !== 'open') {
+    throw new Error('Can only acknowledge open incidents')
+  }
+
+  const now = nowIso()
+  const updated: IncidentRecord = {
+    ...incident,
+    acknowledged_by: principal.sub,
+    acknowledged_at: now,
+    status: 'analyzed', // Move to analyzed status after acknowledgment
+    updated_at: now,
+  }
+
+  await storeIncident(env, updated)
+
+  await publishIncidentEvent(env, updated, 'incident.acknowledged')
+  await triggerWebhooks(env, 'incident.analyzed', updated)
+
+  return updated
+}
+
+export async function escalateIncident(
+  env: Env,
+  incident: IncidentRecord,
+  escalateToSeverity: IncidentSeverity
+): Promise<IncidentRecord> {
+  const severityOrder: IncidentSeverity[] = ['low', 'medium', 'high', 'critical']
+  const currentIndex = severityOrder.indexOf(incident.severity)
+  const escalateToIndex = severityOrder.indexOf(escalateToSeverity)
+
+  if (escalateToIndex <= currentIndex) {
+    throw new Error('Can only escalate to a higher severity')
+  }
+
+  const now = nowIso()
+  const updated: IncidentRecord = {
+    ...incident,
+    severity: escalateToSeverity,
+    escalated_from: incident.severity,
+    escalated_at: now,
+    sla_deadline: calculateSlaDeadline(escalateToSeverity, incident.created_at),
+    updated_at: now,
+  }
+
+  await storeIncident(env, updated)
+
+  await publishIncidentEvent(env, updated, 'incident.escalated')
+
+  return updated
+}
+
+export async function checkSlaBreaches(env: Env): Promise<IncidentRecord[]> {
+  const ids = await getIncidentIndex(env)
+  const incidents = await Promise.all(ids.map(id => getIncident(env, id)))
+  const openIncidents = incidents.filter((i): i is IncidentRecord =>
+    i !== null && ['open', 'analyzed', 'approved'].includes(i.status)
+  )
+
+  const now = new Date()
+  const breached: IncidentRecord[] = []
+
+  for (const incident of openIncidents) {
+    const deadline = incident.sla_deadline || calculateSlaDeadline(incident.severity, incident.created_at)
+    if (new Date(deadline) < now) {
+      breached.push(incident)
+    }
+  }
+
+  return breached
+}
+
+export async function autoEscalateBreachedIncidents(env: Env): Promise<IncidentRecord[]> {
+  const breached = await checkSlaBreaches(env)
+  const escalated: IncidentRecord[] = []
+
+  const severityOrder: IncidentSeverity[] = ['low', 'medium', 'high', 'critical']
+
+  for (const incident of breached) {
+    const currentIndex = severityOrder.indexOf(incident.severity)
+    if (currentIndex < severityOrder.length - 1) {
+      const newSeverity = severityOrder[currentIndex + 1]
+      const escalatedIncident = await escalateIncident(env, incident, newSeverity)
+      escalated.push(escalatedIncident)
+    }
+  }
+
+  return escalated
+}
+
+export async function getIncidentSlaStatus(
+  env: Env,
+  incident: IncidentRecord
+): Promise<{
+  acknowledged: boolean
+  acknowledgedWithinSla: boolean
+  resolvedWithinSla: boolean
+  timeToAcknowledge?: number
+  timeToResolve?: number
+  slaDeadline: string
+  isBreached: boolean
+}> {
+  const deadline = incident.sla_deadline || calculateSlaDeadline(incident.severity, incident.created_at)
+  const thresholds = SLA_THRESHOLDS[incident.severity]
+  const created = new Date(incident.created_at)
+  const now = new Date()
+
+  const result = {
+    acknowledged: !!incident.acknowledged_at,
+    acknowledgedWithinSla: true,
+    resolvedWithinSla: true,
+    timeToAcknowledge: undefined as number | undefined,
+    timeToResolve: undefined as number | undefined,
+    slaDeadline: deadline,
+    isBreached: false,
+  }
+
+  if (incident.acknowledged_at) {
+    const acknowledged = new Date(incident.acknowledged_at)
+    result.timeToAcknowledge = (acknowledged.getTime() - created.getTime()) / 1000 / 60 // minutes
+    result.acknowledgedWithinSla = result.timeToAcknowledge <= thresholds.acknowledge
+  }
+
+  if (incident.status === 'resolved' && incident.updated_at) {
+    const resolved = new Date(incident.updated_at)
+    result.timeToResolve = (resolved.getTime() - created.getTime()) / 1000 / 60 // minutes
+    result.resolvedWithinSla = result.timeToResolve <= thresholds.resolve
+  }
+
+  result.isBreached = new Date(deadline) < now && !['resolved', 'failed'].includes(incident.status)
+
+  return result
+}

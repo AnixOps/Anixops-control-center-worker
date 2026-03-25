@@ -17,6 +17,8 @@ import {
 
 const webhookEventSchema = z.enum([
   'incident.created',
+  'incident.acknowledged',
+  'incident.escalated',
   'incident.analyzed',
   'incident.approved',
   'incident.executing',

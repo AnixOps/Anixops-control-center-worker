@@ -27,6 +27,9 @@ import {
   analyzeIncidentHandler,
   approveIncidentHandler,
   executeIncidentHandler,
+  acknowledgeIncidentHandler,
+  escalateIncidentHandler,
+  getIncidentSlaStatusHandler,
   getIncidentTimelineHandler,
   getIncidentStatisticsHandler,
   searchIncidentsHandler,
@@ -337,10 +340,13 @@ app.post('/api/v1/incidents/bulk/delete', authMiddleware, rbacMiddleware(['admin
 
 app.get('/api/v1/incidents/:id', authMiddleware, getIncidentHandler)
 app.get('/api/v1/incidents/:id/timeline', authMiddleware, getIncidentTimelineHandler)
+app.get('/api/v1/incidents/:id/sla', authMiddleware, getIncidentSlaStatusHandler)
 app.get('/api/v1/incidents/:id/comments', authMiddleware, listIncidentCommentsHandler)
 app.post('/api/v1/incidents/:id/comments', authMiddleware, addIncidentCommentHandler)
 app.put('/api/v1/incidents/:id/comments/:commentId', authMiddleware, updateIncidentCommentHandler)
 app.delete('/api/v1/incidents/:id/comments/:commentId', authMiddleware, deleteIncidentCommentHandler)
+app.post('/api/v1/incidents/:id/acknowledge', authMiddleware, rbacMiddleware(['admin', 'operator']), acknowledgeIncidentHandler)
+app.post('/api/v1/incidents/:id/escalate', authMiddleware, rbacMiddleware(['admin', 'operator']), escalateIncidentHandler)
 app.post('/api/v1/incidents/:id/analyze', authMiddleware, rbacMiddleware(['admin', 'operator']), analyzeIncidentHandler)
 app.post('/api/v1/incidents/:id/approve', authMiddleware, rbacMiddleware(['admin', 'operator']), approveIncidentHandler)
 app.post('/api/v1/incidents/:id/execute', authMiddleware, rbacMiddleware(['admin', 'operator']), executeIncidentHandler)

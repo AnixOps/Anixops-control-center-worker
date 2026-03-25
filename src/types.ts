@@ -264,6 +264,11 @@ export interface IncidentDetail extends IncidentSummary {
   recommendations: IncidentRecommendation[]
   analysis?: Record<string, unknown>
   execution_result?: IncidentExecutionResult
+  acknowledged_by?: number
+  acknowledged_at?: string
+  escalated_from?: string
+  escalated_at?: string
+  sla_deadline?: string
 }
 
 export interface IncidentRecord {
@@ -288,12 +293,19 @@ export interface IncidentRecord {
   analysis?: Record<string, unknown>
   execution_result?: IncidentExecutionResult
   tags: string[]
+  acknowledged_by?: number
+  acknowledged_at?: string
+  escalated_from?: string
+  escalated_at?: string
+  sla_deadline?: string
   created_at: string
   updated_at: string
 }
 
 export type IncidentTimelineEventType =
   | 'created'
+  | 'acknowledged'
+  | 'escalated'
   | 'analyzed'
   | 'approved'
   | 'executing'
@@ -301,6 +313,7 @@ export type IncidentTimelineEventType =
   | 'failed'
   | 'evidence_added'
   | 'comment'
+  | 'severity_upgraded'
 
 export interface IncidentTimelineEvent {
   id: string
@@ -387,6 +400,8 @@ export interface GovernanceEvaluation {
 // Webhook types
 export type WebhookEventType =
   | 'incident.created'
+  | 'incident.acknowledged'
+  | 'incident.escalated'
   | 'incident.analyzed'
   | 'incident.approved'
   | 'incident.executing'

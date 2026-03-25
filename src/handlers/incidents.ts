@@ -5,6 +5,7 @@ import { logAudit } from '../utils/audit'
 import {
   addIncidentComment,
   addIncidentTags,
+  acknowledgeIncident,
   analyzeIncident,
   approveIncident,
   bulkAnalyzeIncidents,
@@ -16,9 +17,11 @@ import {
   canExecuteIncident,
   createIncident,
   deleteIncidentComment,
+  escalateIncident,
   executeIncident,
   getIncident,
   getIncidentComment,
+  getIncidentSlaStatus,
   getIncidentStatistics,
   listAllTags,
   listIncidentComments,
@@ -190,6 +193,68 @@ export async function executeIncidentHandler(c: Context<{ Bindings: Env }>) {
   } catch (err) {
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Execution failed' }, 400)
   }
+}
+
+export async function acknowledgeIncidentHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  try {
+    const updated = await acknowledgeIncident(c.env, incident, principal)
+
+    await logAudit(c, principal.sub, 'acknowledge_incident', 'incident', {
+      incident_id: updated.id,
+      acknowledged_at: updated.acknowledged_at,
+    })
+
+    return c.json({ success: true, data: toIncidentDetail(updated) })
+  } catch (err) {
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Acknowledgment failed' }, 400)
+  }
+}
+
+const escalateSchema = z.object({
+  severity: z.enum(['low', 'medium', 'high', 'critical']),
+})
+
+export async function escalateIncidentHandler(c: Context<{ Bindings: Env }>) {
+  const principal = c.get('user')
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  try {
+    const body = escalateSchema.parse(await c.req.json())
+    const updated = await escalateIncident(c.env, incident, body.severity)
+
+    await logAudit(c, principal.sub, 'escalate_incident', 'incident', {
+      incident_id: updated.id,
+      escalated_from: incident.severity,
+      escalated_to: updated.severity,
+      escalated_at: updated.escalated_at,
+    })
+
+    return c.json({ success: true, data: toIncidentDetail(updated) })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+    }
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Escalation failed' }, 400)
+  }
+}
+
+export async function getIncidentSlaStatusHandler(c: Context<{ Bindings: Env }>) {
+  const incident = await requireIncident(c)
+  if (incident instanceof Response) {
+    return incident
+  }
+
+  const slaStatus = await getIncidentSlaStatus(c.env, incident)
+  return c.json({ success: true, data: slaStatus })
 }
 
 export async function getIncidentTimelineHandler(c: Context<{ Bindings: Env }>) {
