@@ -1,8 +1,6 @@
 import { Hono } from 'hono'
-import { cors } from 'hono/cors'
-import { logger } from 'hono/logger'
-import { prettyJSON } from 'hono/pretty-json'
 import type { ApiErrorResponse, Env } from './types'
+import { createApp } from './app/create-app'
 
 // Handlers
 import { healthHandler, readinessHandler } from './handlers/health'
@@ -374,46 +372,7 @@ import { authMiddleware, rbacMiddleware } from './middleware/auth'
 import { rateLimitMiddleware } from './middleware/rate-limit'
 
 // 创建应用
-const app = new Hono<{ Bindings: Env }>()
-
-// 全局中间件
-app.use('*', logger())
-app.use('*', prettyJSON())
-app.use('*', cors({
-  origin: (origin) => {
-    // 允许的域名
-    const allowed = [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'https://anixops.pages.dev',
-      'https://anixops.dev',
-      'https://www.anixops.dev',
-      'https://api.anixops.com',
-    ]
-    if (allowed.includes(origin)) return origin
-    return allowed[0]
-  },
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
-  exposeHeaders: ['X-Total-Count'],
-  credentials: true,
-  maxAge: 86400,
-}))
-
-// ==================== 公开路由 ====================
-
-// 健康检查
-app.get('/health', healthHandler)
-app.get('/health/detailed', detailedHealthHandler)
-app.get('/readiness', readinessHandler)
-app.get('/liveness', livenessHandler)
-app.get('/metrics', prometheusMetricsHandler)
-
-// 认证 (公开)
-app.post('/api/v1/auth/login', rateLimitMiddleware({ windowMs: 60000, max: 5 }), loginHandler)
-app.post('/api/v1/auth/register', rateLimitMiddleware({ windowMs: 60000, max: 3 }), registerHandler)
-app.post('/api/v1/auth/refresh', refreshHandler)
-app.post('/api/v1/auth/logout', logoutHandler)
+const app = createApp(new Hono<{ Bindings: Env }>())
 
 // ==================== 受保护路由 ====================
 
