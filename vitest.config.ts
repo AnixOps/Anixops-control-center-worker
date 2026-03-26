@@ -5,9 +5,10 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts', 'src/**/*.spec.ts', 'test/**/*.test.ts'],
+    reporters: ['default', 'json'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'html', 'json-summary'],
       include: ['src/utils/**/*.ts', 'src/services/**/*.ts'],
       exclude: [
         'src/**/*.test.ts',

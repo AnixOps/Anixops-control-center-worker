@@ -50,6 +50,25 @@ export interface HealthCheck {
   lastCheck: string
 }
 
+export interface DashboardPanel {
+  id: string
+  title: string
+  type: 'line' | 'bar' | 'pie' | 'stat' | 'table'
+  metrics: string[]
+  width: number
+  height: number
+  x: number
+  y: number
+}
+
+export interface DashboardConfig {
+  id: string
+  name: string
+  panels: DashboardPanel[]
+  refreshInterval: number
+  timeRange: string
+}
+
 export interface RuntimeServiceChecks {
   database: HealthCheck
   kv: HealthCheck
@@ -135,31 +154,7 @@ export async function probeRuntimeServices(env: Env): Promise<RuntimeServiceChec
   return { database, kv, r2 }
 }
 
-/**
- * Dashboard configuration
- */
-export interface DashboardConfig {
-  id: string
-  name: string
-  panels: DashboardPanel[]
-  refreshInterval: number
-  timeRange: string
-}
-
-export interface DashboardPanel {
-  id: string
-  title: string
-  type: 'line' | 'bar' | 'pie' | 'stat' | 'table'
-  metrics: string[]
-  width: number
-  height: number
-  x: number
-  y: number
-}
-
-/**
- * Record a metric data point
- */
+export { buildDeveloperReadinessSummary } from './developer-readiness'
 export async function recordMetric(
   env: Env,
   point: Omit<MetricPoint, 'timestamp'>

@@ -1,6 +1,17 @@
 import type { Context } from 'hono'
 import { z } from 'zod'
-import type { Env } from '../types'
+import type {
+  ApiErrorResponse,
+  Env,
+  SchemaValidationErrorResponse,
+  TaskCancelResponse,
+  TaskCreateResponse,
+  TaskDetailResponse,
+  TaskListItem,
+  TaskListResponse,
+  TaskLogsResponse,
+  TaskRetryResponse,
+} from '../types'
 import { logAudit } from '../utils/audit'
 import { buildTaskChannels, makeRealtimeEvent, publishRealtimeEvent } from '../services/realtime'
 
@@ -8,7 +19,7 @@ const createTaskSchema = z.object({
   playbook_id: z.number().int().positive().optional(),
   playbook_name: z.string().min(1),
   target_nodes: z.array(z.union([z.number(), z.string()])).min(1),
-  variables: z.record(z.unknown()).optional(),
+  variables: z.record(z.string(), z.unknown()).optional(),
 })
 
 const listTasksSchema = z.object({
@@ -67,13 +78,13 @@ export async function listTasksHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     data: {
-      items: result.results,
+      items: result.results as unknown as TaskListItem[],
       total: countResult?.total || 0,
       page,
       per_page,
       total_pages: Math.ceil((countResult?.total || 0) / per_page),
     },
-  })
+  } as TaskListResponse)
 }
 
 /**
@@ -100,8 +111,8 @@ export async function getTaskHandler(c: Context<{ Bindings: Env }>) {
 
   return c.json({
     success: true,
-    data: task,
-  })
+    data: task as unknown as TaskDetailResponse['data'],
+  } as TaskDetailResponse)
 }
 
 /**
@@ -228,10 +239,10 @@ export async function createTaskHandler(c: Context<{ Bindings: Env }>) {
         status: 'pending',
         message: 'Task created and queued for execution',
       },
-    }, 201)
+    } as TaskCreateResponse, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -279,7 +290,7 @@ export async function cancelTaskHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     message: 'Task cancelled successfully',
-  })
+  } as TaskCancelResponse)
 }
 
 /**
@@ -366,7 +377,7 @@ export async function retryTaskHandler(c: Context<{ Bindings: Env }>) {
       status: 'pending',
       message: 'Task retry created and queued',
     },
-  })
+  } as TaskRetryResponse)
 }
 
 /**
@@ -401,8 +412,8 @@ export async function getTaskLogsHandler(c: Context<{ Bindings: Env }>) {
 
   return c.json({
     success: true,
-    data: logs.results,
-  })
+    data: logs.results as unknown as TaskLogsResponse['data'],
+  } as TaskLogsResponse)
 }
 
 /**

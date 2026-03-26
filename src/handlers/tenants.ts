@@ -43,7 +43,7 @@ const updateTenantSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   plan: z.enum(['free', 'pro', 'enterprise']).optional(),
   status: z.enum(['active', 'suspended', 'cancelled']).optional(),
-  settings: z.record(z.unknown()).optional(),
+  settings: z.record(z.string(), z.unknown()).optional(),
   billing_email: z.string().email().optional(),
 })
 
@@ -141,7 +141,7 @@ export async function createTenantHandler(c: Context<{ Bindings: Env }>) {
     }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -207,7 +207,7 @@ export async function updateTenantHandler(c: Context<{ Bindings: Env }>) {
     })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -454,7 +454,7 @@ export async function createTenantRoleHandler(c: Context<{ Bindings: Env }>) {
     }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -505,7 +505,7 @@ export async function updateTenantRoleHandler(c: Context<{ Bindings: Env }>) {
     })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -614,7 +614,7 @@ export async function inviteMemberHandler(c: Context<{ Bindings: Env }>) {
     }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -647,7 +647,7 @@ export async function acceptInvitationHandler(c: Context<{ Bindings: Env }>) {
     })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }

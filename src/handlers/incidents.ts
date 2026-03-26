@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import { z } from 'zod'
-import type { Env, IncidentEvidence, IncidentLink, IncidentRecord, IncidentTimelineEventType, IncidentSeverity, IncidentStatus } from '../types'
+import type { ApiErrorResponse, ApiMessageResponse, ApiSuccessResponse, Env, IncidentEvidence, IncidentLink, IncidentRecord, IncidentTimelineEventType, IncidentSeverity, IncidentStatus, SchemaValidationErrorResponse } from '../types'
 import { logAudit } from '../utils/audit'
 import {
   addIncidentComment,
@@ -257,7 +257,7 @@ async function requireIncident(c: Context<{ Bindings: Env }>) {
   const incident = await getIncident(c.env, incidentId)
 
   if (!incident) {
-    return c.json({ success: false, error: 'Incident not found' }, 404)
+    return c.json({ success: false, error: 'Incident not found' } as ApiErrorResponse, 404)
   }
 
   return incident
@@ -289,7 +289,7 @@ export async function getIncidentHandler(c: Context<{ Bindings: Env }>) {
     return incident
   }
 
-  return c.json({ success: true, data: toIncidentDetail(incident) })
+  return c.json({ success: true, data: toIncidentDetail(incident) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
 }
 
 export async function createIncidentHandler(c: Context<{ Bindings: Env }>) {
@@ -310,7 +310,7 @@ export async function createIncidentHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: toIncidentDetail(incident) }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -330,7 +330,7 @@ export async function analyzeIncidentHandler(c: Context<{ Bindings: Env }>) {
     status: updated.status,
   })
 
-  return c.json({ success: true, data: toIncidentDetail(updated) })
+  return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
 }
 
 export async function approveIncidentHandler(c: Context<{ Bindings: Env }>) {
@@ -341,7 +341,7 @@ export async function approveIncidentHandler(c: Context<{ Bindings: Env }>) {
   }
 
   if (!await canApproveIncident(c.env, principal, incident)) {
-    return c.json({ success: false, error: 'Forbidden: approval policy denies this action' }, 403)
+    return c.json({ success: false, error: 'Forbidden: approval policy denies this action' } as ApiErrorResponse, 403)
   }
 
   const updated = await approveIncident(c.env, incident, principal)
@@ -351,7 +351,7 @@ export async function approveIncidentHandler(c: Context<{ Bindings: Env }>) {
     approved_at: updated.approved_at,
   })
 
-  return c.json({ success: true, data: toIncidentDetail(updated) })
+  return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
 }
 
 export async function executeIncidentHandler(c: Context<{ Bindings: Env }>) {
@@ -362,7 +362,7 @@ export async function executeIncidentHandler(c: Context<{ Bindings: Env }>) {
   }
 
   if (!await canExecuteIncident(c.env, principal, incident)) {
-    return c.json({ success: false, error: 'Forbidden: execution policy denies this action' }, 403)
+    return c.json({ success: false, error: 'Forbidden: execution policy denies this action' } as ApiErrorResponse, 403)
   }
 
   try {
@@ -397,7 +397,7 @@ export async function acknowledgeIncidentHandler(c: Context<{ Bindings: Env }>) 
       acknowledged_at: updated.acknowledged_at,
     })
 
-    return c.json({ success: true, data: toIncidentDetail(updated) })
+    return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
   } catch (err) {
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Acknowledgment failed' }, 400)
   }
@@ -425,10 +425,10 @@ export async function escalateIncidentHandler(c: Context<{ Bindings: Env }>) {
       escalated_at: updated.escalated_at,
     })
 
-    return c.json({ success: true, data: toIncidentDetail(updated) })
+    return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Escalation failed' }, 400)
   }
@@ -457,10 +457,10 @@ export async function assignIncidentHandler(c: Context<{ Bindings: Env }>) {
       assigned_at: updated.assigned_at,
     })
 
-    return c.json({ success: true, data: toIncidentDetail(updated) })
+    return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Assignment failed' }, 400)
   }
@@ -479,7 +479,7 @@ export async function unassignIncidentHandler(c: Context<{ Bindings: Env }>) {
     incident_id: updated.id,
   })
 
-  return c.json({ success: true, data: toIncidentDetail(updated) })
+  return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
 }
 
 export async function getIncidentSlaStatusHandler(c: Context<{ Bindings: Env }>) {
@@ -489,7 +489,7 @@ export async function getIncidentSlaStatusHandler(c: Context<{ Bindings: Env }>)
   }
 
   const slaStatus = await getIncidentSlaStatus(c.env, incident)
-  return c.json({ success: true, data: slaStatus })
+  return c.json({ success: true, data: slaStatus } as ApiSuccessResponse<Awaited<ReturnType<typeof getIncidentSlaStatus>>>)
 }
 
 export async function getIncidentTimelineHandler(c: Context<{ Bindings: Env }>) {
@@ -499,7 +499,7 @@ export async function getIncidentTimelineHandler(c: Context<{ Bindings: Env }>) 
   }
 
   const timeline = buildIncidentTimeline(incident)
-  return c.json({ success: true, data: timeline })
+  return c.json({ success: true, data: timeline } as ApiSuccessResponse<ReturnType<typeof buildIncidentTimeline>>)
 }
 
 const createCommentSchema = z.object({
@@ -518,7 +518,7 @@ export async function listIncidentCommentsHandler(c: Context<{ Bindings: Env }>)
   }
 
   const comments = await listIncidentComments(c.env, incident.id)
-  return c.json({ success: true, data: comments })
+  return c.json({ success: true, data: comments } as ApiSuccessResponse<Awaited<ReturnType<typeof listIncidentComments>>>)
 }
 
 export async function addIncidentCommentHandler(c: Context<{ Bindings: Env }>) {
@@ -538,10 +538,10 @@ export async function addIncidentCommentHandler(c: Context<{ Bindings: Env }>) {
       visibility: comment.visibility,
     })
 
-    return c.json({ success: true, data: comment }, 201)
+    return c.json({ success: true, data: comment } as ApiSuccessResponse<Awaited<ReturnType<typeof addIncidentComment>>>, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -556,7 +556,7 @@ export async function updateIncidentCommentHandler(c: Context<{ Bindings: Env }>
     const updated = await updateIncidentComment(c.env, commentId, principal, body.content)
 
     if (!updated) {
-      return c.json({ success: false, error: 'Comment not found or not authorized' }, 404)
+      return c.json({ success: false, error: 'Comment not found or not authorized' } as ApiErrorResponse, 404)
     }
 
     await logAudit(c, principal.sub, 'update_incident_comment', 'incident', {
@@ -564,10 +564,10 @@ export async function updateIncidentCommentHandler(c: Context<{ Bindings: Env }>
       comment_id: updated.id,
     })
 
-    return c.json({ success: true, data: updated })
+    return c.json({ success: true, data: updated } as ApiSuccessResponse<Awaited<ReturnType<typeof updateIncidentComment>>>)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -580,14 +580,14 @@ export async function deleteIncidentCommentHandler(c: Context<{ Bindings: Env }>
   const deleted = await deleteIncidentComment(c.env, commentId, principal)
 
   if (!deleted) {
-    return c.json({ success: false, error: 'Comment not found or not authorized' }, 404)
+    return c.json({ success: false, error: 'Comment not found or not authorized' } as ApiErrorResponse, 404)
   }
 
   await logAudit(c, principal.sub, 'delete_incident_comment', 'incident', {
     comment_id: commentId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 // Tag Management
@@ -616,10 +616,10 @@ export async function addTagsHandler(c: Context<{ Bindings: Env }>) {
       tags: body.tags,
     })
 
-    return c.json({ success: true, data: toIncidentDetail(updated) })
+    return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -641,10 +641,10 @@ export async function removeTagsHandler(c: Context<{ Bindings: Env }>) {
       tags: body.tags,
     })
 
-    return c.json({ success: true, data: toIncidentDetail(updated) })
+    return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -666,10 +666,10 @@ export async function setTagsHandler(c: Context<{ Bindings: Env }>) {
       tags: body.tags,
     })
 
-    return c.json({ success: true, data: toIncidentDetail(updated) })
+    return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -789,7 +789,7 @@ export async function bulkApproveIncidentsHandler(c: Context<{ Bindings: Env }>)
     return c.json({ success: true, data: result })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -811,7 +811,7 @@ export async function bulkExecuteIncidentsHandler(c: Context<{ Bindings: Env }>)
     return c.json({ success: true, data: result })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -833,7 +833,7 @@ export async function bulkAnalyzeIncidentsHandler(c: Context<{ Bindings: Env }>)
     return c.json({ success: true, data: result })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -855,7 +855,7 @@ export async function bulkDeleteIncidentsHandler(c: Context<{ Bindings: Env }>) 
     return c.json({ success: true, data: result })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -901,7 +901,7 @@ export async function createSuppressionRuleHandler(c: Context<{ Bindings: Env }>
     return c.json({ success: true, data: rule }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -914,14 +914,14 @@ export async function deleteSuppressionRuleHandler(c: Context<{ Bindings: Env }>
   const deleted = await deleteSuppressionRule(c.env, ruleId)
 
   if (!deleted) {
-    return c.json({ success: false, error: 'Suppression rule not found' }, 404)
+    return c.json({ success: false, error: 'Suppression rule not found' } as ApiErrorResponse, 404)
   }
 
   await logAudit(c, principal.sub, 'delete_suppression_rule', 'incident', {
     rule_id: ruleId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 export async function toggleSuppressionRuleHandler(c: Context<{ Bindings: Env }>) {
@@ -933,7 +933,7 @@ export async function toggleSuppressionRuleHandler(c: Context<{ Bindings: Env }>
     const rule = await toggleSuppressionRule(c.env, ruleId, body.enabled)
 
     if (!rule) {
-      return c.json({ success: false, error: 'Suppression rule not found' }, 404)
+      return c.json({ success: false, error: 'Suppression rule not found' } as ApiErrorResponse, 404)
     }
 
     await logAudit(c, principal.sub, 'toggle_suppression_rule', 'incident', {
@@ -944,7 +944,7 @@ export async function toggleSuppressionRuleHandler(c: Context<{ Bindings: Env }>
     return c.json({ success: true, data: rule })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -985,7 +985,7 @@ export async function mergeIncidentsHandler(c: Context<{ Bindings: Env }>) {
     })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Merge failed' }, 400)
   }
@@ -1035,7 +1035,7 @@ export async function createNotificationRuleHandler(c: Context<{ Bindings: Env }
     return c.json({ success: true, data: rule }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1048,14 +1048,14 @@ export async function deleteNotificationRuleHandler(c: Context<{ Bindings: Env }
   const deleted = await deleteNotificationRule(c.env, ruleId)
 
   if (!deleted) {
-    return c.json({ success: false, error: 'Notification rule not found' }, 404)
+    return c.json({ success: false, error: 'Notification rule not found' } as ApiErrorResponse, 404)
   }
 
   await logAudit(c, principal.sub, 'delete_notification_rule', 'incident', {
     rule_id: ruleId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 export async function toggleNotificationRuleHandler(c: Context<{ Bindings: Env }>) {
@@ -1067,7 +1067,7 @@ export async function toggleNotificationRuleHandler(c: Context<{ Bindings: Env }
     const rule = await toggleNotificationRule(c.env, ruleId, body.enabled)
 
     if (!rule) {
-      return c.json({ success: false, error: 'Notification rule not found' }, 404)
+      return c.json({ success: false, error: 'Notification rule not found' } as ApiErrorResponse, 404)
     }
 
     await logAudit(c, principal.sub, 'toggle_notification_rule', 'incident', {
@@ -1078,7 +1078,7 @@ export async function toggleNotificationRuleHandler(c: Context<{ Bindings: Env }
     return c.json({ success: true, data: rule })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1117,10 +1117,10 @@ async function handleIncidentMutation<TBody>(
 
     await logAudit(c, principal.sub, action, 'incident', auditDetails(incident, body))
 
-    return c.json({ success: true, data: toIncidentDetail(updated) })
+    return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1167,7 +1167,7 @@ export async function removeIncidentLinkHandler(c: Context<{ Bindings: Env }>) {
     link_id: linkId,
   })
 
-  return c.json({ success: true, data: toIncidentDetail(updated) })
+  return c.json({ success: true, data: toIncidentDetail(updated) } as ApiSuccessResponse<ReturnType<typeof toIncidentDetail>>)
 }
 
 // Evidence Management
@@ -1233,7 +1233,7 @@ export async function executeRunbookHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: result })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1269,7 +1269,7 @@ export async function getTemplateHandler(c: Context<{ Bindings: Env }>) {
   const template = await getIncidentTemplate(c.env, templateId)
 
   if (!template) {
-    return c.json({ success: false, error: 'Template not found' }, 404)
+    return c.json({ success: false, error: 'Template not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({ success: true, data: template })
@@ -1302,7 +1302,7 @@ export async function createTemplateHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: template }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1317,7 +1317,7 @@ export async function updateTemplateHandler(c: Context<{ Bindings: Env }>) {
     const template = await updateIncidentTemplate(c.env, templateId, body)
 
     if (!template) {
-      return c.json({ success: false, error: 'Template not found' }, 404)
+      return c.json({ success: false, error: 'Template not found' } as ApiErrorResponse, 404)
     }
 
     await logAudit(c, principal.sub, 'update_incident_template', 'incident', {
@@ -1327,7 +1327,7 @@ export async function updateTemplateHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: template })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1340,14 +1340,14 @@ export async function deleteTemplateHandler(c: Context<{ Bindings: Env }>) {
   const deleted = await deleteIncidentTemplate(c.env, templateId)
 
   if (!deleted) {
-    return c.json({ success: false, error: 'Template not found' }, 404)
+    return c.json({ success: false, error: 'Template not found' } as ApiErrorResponse, 404)
   }
 
   await logAudit(c, principal.sub, 'delete_incident_template', 'incident', {
     template_id: templateId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 export async function createFromTemplateHandler(c: Context<{ Bindings: Env }>) {
@@ -1355,7 +1355,7 @@ export async function createFromTemplateHandler(c: Context<{ Bindings: Env }>) {
   const templateId = c.req.param('templateId') as string
 
   try {
-    const body = z.object({ variables: z.record(z.string()).optional() }).parse(await c.req.json())
+    const body = z.object({ variables: z.record(z.string(), z.string()).optional() }).parse(await c.req.json())
     const incident = await createIncidentFromTemplate(c.env, principal, templateId, body.variables || {})
 
     await logAudit(c, principal.sub, 'create_incident_from_template', 'incident', {
@@ -1366,7 +1366,7 @@ export async function createFromTemplateHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: toIncidentDetail(incident) }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create incident' }, 400)
   }
@@ -1429,7 +1429,7 @@ export async function createAutomationRuleHandler(c: Context<{ Bindings: Env }>)
     return c.json({ success: true, data: rule }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1442,14 +1442,14 @@ export async function deleteAutomationRuleHandler(c: Context<{ Bindings: Env }>)
   const deleted = await deleteAutomationRule(c.env, ruleId)
 
   if (!deleted) {
-    return c.json({ success: false, error: 'Automation rule not found' }, 404)
+    return c.json({ success: false, error: 'Automation rule not found' } as ApiErrorResponse, 404)
   }
 
   await logAudit(c, principal.sub, 'delete_automation_rule', 'incident', {
     rule_id: ruleId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 export async function toggleAutomationRuleHandler(c: Context<{ Bindings: Env }>) {
@@ -1461,7 +1461,7 @@ export async function toggleAutomationRuleHandler(c: Context<{ Bindings: Env }>)
     const rule = await toggleAutomationRule(c.env, ruleId, body.enabled)
 
     if (!rule) {
-      return c.json({ success: false, error: 'Automation rule not found' }, 404)
+      return c.json({ success: false, error: 'Automation rule not found' } as ApiErrorResponse, 404)
     }
 
     await logAudit(c, principal.sub, 'toggle_automation_rule', 'incident', {
@@ -1472,7 +1472,7 @@ export async function toggleAutomationRuleHandler(c: Context<{ Bindings: Env }>)
     return c.json({ success: true, data: rule })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1511,7 +1511,7 @@ export async function getPostMortemHandler(c: Context<{ Bindings: Env }>) {
   const postMortem = await getPostMortem(c.env, incidentId)
 
   if (!postMortem) {
-    return c.json({ success: false, error: 'Post-mortem not found' }, 404)
+    return c.json({ success: false, error: 'Post-mortem not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({ success: true, data: postMortem })
@@ -1544,7 +1544,7 @@ export async function createPostMortemHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: postMortem }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create post-mortem' }, 400)
   }
@@ -1559,7 +1559,7 @@ export async function updatePostMortemHandler(c: Context<{ Bindings: Env }>) {
     const postMortem = await updatePostMortem(c.env, incidentId, body)
 
     if (!postMortem) {
-      return c.json({ success: false, error: 'Post-mortem not found' }, 404)
+      return c.json({ success: false, error: 'Post-mortem not found' } as ApiErrorResponse, 404)
     }
 
     await logAudit(c, principal.sub, 'update_postmortem', 'incident', {
@@ -1569,7 +1569,7 @@ export async function updatePostMortemHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: postMortem })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1597,7 +1597,7 @@ export async function updateActionItemHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: postMortem })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1618,7 +1618,7 @@ export async function getIncidentCorrelationHandler(c: Context<{ Bindings: Env }
   // Verify incident exists
   const incident = await getIncident(c.env, incidentId)
   if (!incident) {
-    return c.json({ success: false, error: 'Incident not found' }, 404)
+    return c.json({ success: false, error: 'Incident not found' } as ApiErrorResponse, 404)
   }
 
   const correlation = await findRelatedIncidents(c.env, incidentId)
@@ -1655,7 +1655,7 @@ export async function watchIncidentHandler(c: Context<{ Bindings: Env }>) {
   // Verify incident exists
   const incident = await getIncident(c.env, incidentId)
   if (!incident) {
-    return c.json({ success: false, error: 'Incident not found' }, 404)
+    return c.json({ success: false, error: 'Incident not found' } as ApiErrorResponse, 404)
   }
 
   try {
@@ -1670,7 +1670,7 @@ export async function watchIncidentHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: watch }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1690,7 +1690,7 @@ export async function unwatchIncidentHandler(c: Context<{ Bindings: Env }>) {
     incident_id: incidentId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 export async function getIncidentWatchersHandler(c: Context<{ Bindings: Env }>) {
@@ -1699,7 +1699,7 @@ export async function getIncidentWatchersHandler(c: Context<{ Bindings: Env }>) 
   // Verify incident exists
   const incident = await getIncident(c.env, incidentId)
   if (!incident) {
-    return c.json({ success: false, error: 'Incident not found' }, 404)
+    return c.json({ success: false, error: 'Incident not found' } as ApiErrorResponse, 404)
   }
 
   const watchers = await getIncidentWatchers(c.env, incidentId)
@@ -1722,7 +1722,7 @@ export async function createExternalTicketHandler(c: Context<{ Bindings: Env }>)
   // Verify incident exists
   const incident = await getIncident(c.env, incidentId)
   if (!incident) {
-    return c.json({ success: false, error: 'Incident not found' }, 404)
+    return c.json({ success: false, error: 'Incident not found' } as ApiErrorResponse, 404)
   }
 
   try {
@@ -1746,7 +1746,7 @@ export async function createExternalTicketHandler(c: Context<{ Bindings: Env }>)
     return c.json({ success: true, data: ticket }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1758,7 +1758,7 @@ export async function listExternalTicketsHandler(c: Context<{ Bindings: Env }>) 
   // Verify incident exists
   const incident = await getIncident(c.env, incidentId)
   if (!incident) {
-    return c.json({ success: false, error: 'Incident not found' }, 404)
+    return c.json({ success: false, error: 'Incident not found' } as ApiErrorResponse, 404)
   }
 
   const tickets = await getExternalTickets(c.env, incidentId)
@@ -1791,7 +1791,7 @@ export async function updateExternalTicketHandler(c: Context<{ Bindings: Env }>)
     return c.json({ success: true, data: ticket })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1806,7 +1806,7 @@ const responsePlaybookStepSchema = z.object({
   automated_action: z.object({
     type: z.enum(['run_playbook', 'restart_deployment', 'scale_deployment', 'execute_webhook', 'notify']),
     ref: z.string(),
-    params: z.record(z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
   }).optional(),
   estimated_duration_minutes: z.number().int().min(1).optional(),
   required_role: z.enum(['admin', 'operator', 'viewer']).optional(),
@@ -1840,7 +1840,7 @@ export async function getResponsePlaybookHandler(c: Context<{ Bindings: Env }>) 
   const playbook = await getResponsePlaybook(c.env, playbookId)
 
   if (!playbook) {
-    return c.json({ success: false, error: 'Playbook not found' }, 404)
+    return c.json({ success: false, error: 'Playbook not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({ success: true, data: playbook })
@@ -1861,7 +1861,7 @@ export async function createResponsePlaybookHandler(c: Context<{ Bindings: Env }
     return c.json({ success: true, data: playbook }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1883,7 +1883,7 @@ export async function updateResponsePlaybookHandler(c: Context<{ Bindings: Env }
     const playbook = await updateResponsePlaybook(c.env, playbookId, updates)
 
     if (!playbook) {
-      return c.json({ success: false, error: 'Playbook not found' }, 404)
+      return c.json({ success: false, error: 'Playbook not found' } as ApiErrorResponse, 404)
     }
 
     await logAudit(c, principal.sub, 'update_response_playbook', 'incident', {
@@ -1893,7 +1893,7 @@ export async function updateResponsePlaybookHandler(c: Context<{ Bindings: Env }
     return c.json({ success: true, data: playbook })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -1906,14 +1906,14 @@ export async function deleteResponsePlaybookHandler(c: Context<{ Bindings: Env }
   const deleted = await deleteResponsePlaybook(c.env, playbookId)
 
   if (!deleted) {
-    return c.json({ success: false, error: 'Playbook not found' }, 404)
+    return c.json({ success: false, error: 'Playbook not found' } as ApiErrorResponse, 404)
   }
 
   await logAudit(c, principal.sub, 'delete_response_playbook', 'incident', {
     playbook_id: playbookId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 export async function matchResponsePlaybooksHandler(c: Context<{ Bindings: Env }>) {
@@ -1921,7 +1921,7 @@ export async function matchResponsePlaybooksHandler(c: Context<{ Bindings: Env }
 
   const incident = await getIncident(c.env, incidentId)
   if (!incident) {
-    return c.json({ success: false, error: 'Incident not found' }, 404)
+    return c.json({ success: false, error: 'Incident not found' } as ApiErrorResponse, 404)
   }
 
   const playbooks = await matchResponsePlaybooks(c.env, incident)
@@ -1954,7 +1954,7 @@ export async function getPlaybookExecutionHandler(c: Context<{ Bindings: Env }>)
   const execution = await getPlaybookExecution(c.env, executionId)
 
   if (!execution) {
-    return c.json({ success: false, error: 'Execution not found' }, 404)
+    return c.json({ success: false, error: 'Execution not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({ success: true, data: execution })
@@ -1965,7 +1965,7 @@ export async function completePlaybookStepHandler(c: Context<{ Bindings: Env }>)
   const executionId = c.req.param('executionId') as string
   const stepId = c.req.param('stepId') as string
 
-  const body = z.object({ result: z.record(z.unknown()).optional() }).parse(await c.req.json())
+  const body = z.object({ result: z.record(z.string(), z.unknown()).optional() }).parse(await c.req.json())
 
   const execution = await completePlaybookStep(c.env, executionId, stepId, principal, body.result)
 
@@ -2055,7 +2055,7 @@ export async function createCustomFieldHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: field }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create field' }, 400)
   }
@@ -2080,7 +2080,7 @@ export async function updateCustomFieldHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: field })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -2100,7 +2100,7 @@ export async function deleteCustomFieldHandler(c: Context<{ Bindings: Env }>) {
     field_id: fieldId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 export async function setIncidentCustomFieldHandler(c: Context<{ Bindings: Env }>) {
@@ -2131,7 +2131,7 @@ export async function getIncidentCustomFieldsHandler(c: Context<{ Bindings: Env 
 
   const incident = await getIncident(c.env, incidentId)
   if (!incident) {
-    return c.json({ success: false, error: 'Incident not found' }, 404)
+    return c.json({ success: false, error: 'Incident not found' } as ApiErrorResponse, 404)
   }
 
   const fields = await getIncidentCustomFields(c.env, incidentId)
@@ -2146,7 +2146,7 @@ export async function generateAIRootCauseAnalysisHandler(c: Context<{ Bindings: 
 
   const incident = await getIncident(c.env, incidentId)
   if (!incident) {
-    return c.json({ success: false, error: 'Incident not found' }, 404)
+    return c.json({ success: false, error: 'Incident not found' } as ApiErrorResponse, 404)
   }
 
   try {
@@ -2331,7 +2331,7 @@ export async function exportIncidentsHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: result }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -2393,7 +2393,7 @@ export async function createReviewHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: review }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create review' }, 400)
   }
@@ -2477,7 +2477,7 @@ export async function submitFeedbackHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: feedback }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to submit feedback' }, 400)
   }
@@ -2521,7 +2521,7 @@ export async function calculateCostHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: cost }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to calculate cost' }, 400)
   }
@@ -2564,7 +2564,7 @@ export async function createComplianceHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: record }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Failed to create compliance record' }, 400)
   }
@@ -2667,7 +2667,7 @@ export async function createOnCallScheduleHandler(c: Context<{ Bindings: Env }>)
     return c.json({ success: true, data: schedule }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -2756,7 +2756,7 @@ export async function linkChangeHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: link }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -2862,7 +2862,7 @@ export async function deleteResponderTeamHandler(c: Context<{ Bindings: Env }>) 
     team_id: teamId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 // ==================== SLA Calendars ====================
@@ -2925,7 +2925,7 @@ export async function getNotificationTemplateHandler(c: Context<{ Bindings: Env 
   const template = await getNotificationTemplate(c.env, templateId)
 
   if (!template) {
-    return c.json({ success: false, error: 'Template not found' }, 404)
+    return c.json({ success: false, error: 'Template not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({ success: true, data: template })
@@ -3063,7 +3063,7 @@ export async function deleteAttachmentHandler(c: Context<{ Bindings: Env }>) {
     attachment_id: attachmentId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 // ==================== Related Items ====================
@@ -3085,7 +3085,7 @@ export async function addRelatedItemHandler(c: Context<{ Bindings: Env }>) {
     description: z.string().optional(),
     url: z.string().url().optional(),
     content: z.string().optional(),
-    metadata: z.record(z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   }).parse(await c.req.json())
 
   const item = await addRelatedItem(c.env, incidentId, principal, body)
@@ -3115,7 +3115,7 @@ export async function removeRelatedItemHandler(c: Context<{ Bindings: Env }>) {
     item_id: itemId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 // ==================== Response Time Targets ====================
@@ -3174,7 +3174,7 @@ export async function createIntegrationHandler(c: Context<{ Bindings: Env }>) {
   const body = z.object({
     name: z.string().min(1).max(100),
     type: z.enum(['pagerduty', 'opsgenie', 'datadog', 'newrelic', 'prometheus', 'grafana', 'slack', 'teams', 'custom']),
-    config: z.record(z.unknown()),
+    config: z.record(z.string(), z.unknown()),
     mapping_rules: z.array(z.object({
       source_field: z.string(),
       target_field: z.string(),
@@ -3200,7 +3200,7 @@ export async function updateIntegrationHandler(c: Context<{ Bindings: Env }>) {
   const body = z.object({
     name: z.string().min(1).max(100).optional(),
     enabled: z.boolean().optional(),
-    config: z.record(z.unknown()).optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
     mapping_rules: z.array(z.object({
       source_field: z.string(),
       target_field: z.string(),
@@ -3235,7 +3235,7 @@ export async function deleteIntegrationHandler(c: Context<{ Bindings: Env }>) {
     integration_id: integrationId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 // ==================== Timeline Events ====================
@@ -3253,8 +3253,8 @@ export async function addTimelineEventHandler(c: Context<{ Bindings: Env }>) {
   const body = z.object({
     type: z.enum(['created', 'acknowledged', 'escalated', 'assigned', 'merged', 'analyzed', 'approved', 'executing', 'resolved', 'failed', 'evidence_added', 'comment', 'severity_upgraded']),
     summary: z.string().min(1).max(1000),
-    details: z.record(z.unknown()).optional(),
-    metadata: z.record(z.unknown()).optional(),
+    details: z.record(z.string(), z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   }).parse(await c.req.json())
 
   const event = await addTimelineEvent(c.env, incidentId, {
@@ -3394,7 +3394,7 @@ export async function deleteRunbookHandler(c: Context<{ Bindings: Env }>) {
     runbook_id: runbookId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 // ==================== Auto-Remediation Rules ====================
@@ -3424,7 +3424,7 @@ export async function createAutoRemediationRuleHandler(c: Context<{ Bindings: En
         script: z.string().optional(),
         api_endpoint: z.string().optional(),
         api_method: z.string().optional(),
-        api_payload: z.record(z.unknown()).optional(),
+        api_payload: z.record(z.string(), z.unknown()).optional(),
         service_name: z.string().optional(),
         target_replicas: z.number().int().optional(),
       }),
@@ -3466,7 +3466,7 @@ export async function updateAutoRemediationRuleHandler(c: Context<{ Bindings: En
         script: z.string().optional(),
         api_endpoint: z.string().optional(),
         api_method: z.string().optional(),
-        api_payload: z.record(z.unknown()).optional(),
+        api_payload: z.record(z.string(), z.unknown()).optional(),
         service_name: z.string().optional(),
         target_replicas: z.number().int().optional(),
       }),
@@ -3505,7 +3505,7 @@ export async function deleteAutoRemediationRuleHandler(c: Context<{ Bindings: En
     rule_id: ruleId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 // ==================== Maintenance Windows ====================
@@ -3607,7 +3607,7 @@ export async function cancelMaintenanceWindowHandler(c: Context<{ Bindings: Env 
     window_id: windowId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 // ==================== Bulk Operations ====================
@@ -3635,7 +3635,7 @@ export async function createBulkOperationHandler(c: Context<{ Bindings: Env }>) 
   const body = z.object({
     operation_type: z.enum(['assign', 'status_change', 'severity_change', 'tag', 'close', 'escalate']),
     incident_ids: z.array(z.string().min(1)).min(1).max(100),
-    payload: z.record(z.unknown()),
+    payload: z.record(z.string(), z.unknown()),
   }).parse(await c.req.json())
 
   const op = await createBulkOperation(c.env, principal, body)
@@ -3758,7 +3758,7 @@ export async function createWebhookSubscriptionHandler(c: Context<{ Bindings: En
       services: z.array(z.string()).optional(),
       tags: z.array(z.string()).optional(),
     }).optional(),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
     retry_policy: z.object({
       max_retries: z.number().int().min(0).max(10),
       backoff_multiplier: z.number().min(1).max(10),
@@ -3793,7 +3793,7 @@ export async function updateWebhookSubscriptionHandler(c: Context<{ Bindings: En
       services: z.array(z.string()).optional(),
       tags: z.array(z.string()).optional(),
     }).optional(),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
     retry_policy: z.object({
       max_retries: z.number().int().min(0).max(10),
       backoff_multiplier: z.number().min(1).max(10),
@@ -3829,7 +3829,7 @@ export async function deleteWebhookSubscriptionHandler(c: Context<{ Bindings: En
     subscription_id: subscriptionId,
   })
 
-  return c.json({ success: true })
+  return c.json({ success: true } as ApiMessageResponse)
 }
 
 // ==================== Snooze ====================
@@ -3956,7 +3956,7 @@ export async function detectRecurrenceHandler(c: Context<{ Bindings: Env }>) {
   const incident = await getIncident(c.env, incidentId)
 
   if (!incident) {
-    return c.json({ success: false, error: 'Incident not found' }, 404)
+    return c.json({ success: false, error: 'Incident not found' } as ApiErrorResponse, 404)
   }
 
   const recurrence = await detectRecurrence(c.env, incident)

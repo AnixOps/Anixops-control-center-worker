@@ -9,7 +9,18 @@
  */
 
 import type { Context } from 'hono'
-import type { Env } from '../types'
+import type {
+  ApiErrorResponse,
+  ApiMessageResponse,
+  AuditActionsResponse,
+  AuditCleanupResponse,
+  AuditLog,
+  AuditLogDetailResponse,
+  AuditLogListResponse,
+  AuditStatsResponse,
+  Env,
+  SIEMConfigResponse,
+} from '../types'
 import { z } from 'zod'
 import {
   getAuditLogs,
@@ -67,7 +78,7 @@ export async function listAuditLogsHandler(c: Context<{ Bindings: Env }>) {
       per_page: perPage,
       total_pages: Math.ceil(total / perPage),
     },
-  })
+  } as AuditLogListResponse)
 }
 
 /**
@@ -77,7 +88,7 @@ export async function getAuditLogHandler(c: Context<{ Bindings: Env }>) {
   const logId = parseInt(getRequiredParam(c, 'id'), 10)
 
   if (isNaN(logId)) {
-    return c.json({ success: false, error: 'Invalid log ID' }, 400)
+    return c.json({ success: false, error: 'Invalid log ID' } as ApiErrorResponse, 400)
   }
 
   const log = await c.env.DB
@@ -91,13 +102,13 @@ export async function getAuditLogHandler(c: Context<{ Bindings: Env }>) {
     .first()
 
   if (!log) {
-    return c.json({ success: false, error: 'Audit log not found' }, 404)
+    return c.json({ success: false, error: 'Audit log not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({
     success: true,
-    data: log,
-  })
+    data: log as unknown as AuditLogDetailResponse['data'],
+  } as AuditLogDetailResponse)
 }
 
 /**
@@ -176,7 +187,7 @@ export async function getAuditStatsHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     data: stats,
-  })
+  } as AuditStatsResponse)
 }
 
 /**
@@ -196,7 +207,7 @@ export async function cleanupAuditLogsHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     data: result,
-  })
+  } as AuditCleanupResponse)
 }
 
 /**
@@ -213,7 +224,7 @@ export async function getSIEMConfigHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     data: config,
-  })
+  } as SIEMConfigResponse)
 }
 
 /**
@@ -237,10 +248,10 @@ export async function updateSIEMConfigHandler(c: Context<{ Bindings: Env }>) {
     return c.json({
       success: true,
       message: 'SIEM configuration updated',
-    })
+    } as ApiMessageResponse)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -301,7 +312,7 @@ export async function testSIEMConnectionHandler(c: Context<{ Bindings: Env }>) {
     return c.json({
       success: true,
       message: 'SIEM connection test successful',
-    })
+    } as ApiMessageResponse)
   } catch (err) {
     return c.json({
       success: false,
@@ -340,5 +351,5 @@ export async function getAuditActionsHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     data: actions,
-  })
+  } as AuditActionsResponse)
 }

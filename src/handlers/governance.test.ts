@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import app from '../index'
-import type { Env } from '../types'
+import type { AuthLoginResponse, Env } from '../types'
 import { createMockD1, createMockKV, createMockR2 } from '../../test/setup'
 import type { GovernancePolicy } from '../types'
 
@@ -32,7 +32,7 @@ async function registerAndLogin(env: Env, email: string, password: string, role:
     body: JSON.stringify({ email, password }),
   }, env)
 
-  const loginData = await loginRes.json() as { data?: { access_token: string } }
+  const loginData = await loginRes.json() as AuthLoginResponse
   return loginData.data?.access_token || ''
 }
 

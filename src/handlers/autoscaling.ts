@@ -3,7 +3,7 @@
  */
 
 import type { Context } from 'hono'
-import type { Env } from '../types'
+import type { ApiErrorResponse, ApiSuccessResponse, Env } from '../types'
 import { logAudit } from '../utils/audit'
 import {
   createScalingPolicy,
@@ -42,10 +42,10 @@ export async function getScalingPolicyHandler(c: Context<{ Bindings: Env }>) {
   const policy = await getScalingPolicy(c.env, id)
 
   if (!policy) {
-    return c.json({ success: false, error: 'Policy not found' }, 404)
+    return c.json({ success: false, error: 'Policy not found' } as ApiErrorResponse, 404)
   }
 
-  return c.json({ success: true, data: policy })
+  return c.json({ success: true, data: policy } as ApiSuccessResponse<unknown>)
 }
 
 /**
@@ -57,12 +57,12 @@ export async function createScalingPolicyHandler(c: Context<{ Bindings: Env }>) 
 
   // Validate required fields
   if (!body.name || !body.targetType || !body.targetId) {
-    return c.json({ success: false, error: 'name, targetType, and targetId required' }, 400)
+    return c.json({ success: false, error: 'name, targetType, and targetId required' } as ApiErrorResponse, 400)
   }
 
   const validTargetTypes = ['node', 'service', 'deployment']
   if (!validTargetTypes.includes(body.targetType)) {
-    return c.json({ success: false, error: `targetType must be one of: ${validTargetTypes.join(', ')}` }, 400)
+    return c.json({ success: false, error: `targetType must be one of: ${validTargetTypes.join(', ')}` } as ApiErrorResponse, 400)
   }
 
   const result = await createScalingPolicy(c.env, {
@@ -132,7 +132,7 @@ export async function evaluateScalingPolicyHandler(c: Context<{ Bindings: Env }>
   const policy = await getScalingPolicy(c.env, id)
 
   if (!policy) {
-    return c.json({ success: false, error: 'Policy not found' }, 404)
+    return c.json({ success: false, error: 'Policy not found' } as ApiErrorResponse, 404)
   }
 
   const decision = await evaluateScalingPolicy(c.env, policy)
@@ -161,7 +161,7 @@ export async function executeScalingActionHandler(c: Context<{ Bindings: Env }>)
 
   const policy = await getScalingPolicy(c.env, id)
   if (!policy) {
-    return c.json({ success: false, error: 'Policy not found' }, 404)
+    return c.json({ success: false, error: 'Policy not found' } as ApiErrorResponse, 404)
   }
 
   // Get evaluation or use provided values
@@ -220,7 +220,7 @@ export async function getRecommendedReplicasHandler(c: Context<{ Bindings: Env }
   const policy = await getScalingPolicy(c.env, id)
 
   if (!policy) {
-    return c.json({ success: false, error: 'Policy not found' }, 404)
+    return c.json({ success: false, error: 'Policy not found' } as ApiErrorResponse, 404)
   }
 
   const recommended = await getRecommendedReplicas(c.env, policy)
@@ -265,7 +265,7 @@ export async function toggleScalingPolicyHandler(c: Context<{ Bindings: Env }>) 
 
   const policy = await getScalingPolicy(c.env, id)
   if (!policy) {
-    return c.json({ success: false, error: 'Policy not found' }, 404)
+    return c.json({ success: false, error: 'Policy not found' } as ApiErrorResponse, 404)
   }
 
   const result = await updateScalingPolicy(c.env, id, {
@@ -290,7 +290,7 @@ export async function getScalingMetricsHandler(c: Context<{ Bindings: Env }>) {
   const policy = await getScalingPolicy(c.env, id)
 
   if (!policy) {
-    return c.json({ success: false, error: 'Policy not found' }, 404)
+    return c.json({ success: false, error: 'Policy not found' } as ApiErrorResponse, 404)
   }
 
   // Get current metrics

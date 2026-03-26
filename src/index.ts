@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { prettyJSON } from 'hono/pretty-json'
-import type { Env } from './types'
+import type { ApiErrorResponse, Env } from './types'
 
 // Handlers
 import { healthHandler, readinessHandler } from './handlers/health'
@@ -366,6 +366,7 @@ import {
   developerModeStatusHandler,
   developerDiagnosticsHandler,
   developerFixturesCatalogHandler,
+  developerReadinessSummaryHandler,
 } from './handlers/internal-dev'
 
 // Middleware
@@ -958,11 +959,12 @@ app.post('/api/v1/web3/audit', authMiddleware, web3AuditHandler)
 app.get('/api/v1/internal/dev/status', authMiddleware, rbacMiddleware(['admin']), developerModeStatusHandler)
 app.get('/api/v1/internal/dev/diagnostics', authMiddleware, rbacMiddleware(['admin']), developerDiagnosticsHandler)
 app.get('/api/v1/internal/dev/fixtures', authMiddleware, rbacMiddleware(['admin']), developerFixturesCatalogHandler)
+app.get('/api/v1/internal/dev/readiness-summary', authMiddleware, rbacMiddleware(['admin']), developerReadinessSummaryHandler)
 
 // ==================== 错误处理 ====================
 
 app.notFound((c) => {
-  return c.json({ success: false, error: 'Not Found' }, 404)
+  return c.json({ success: false, error: 'Not Found' } as ApiErrorResponse, 404)
 })
 
 app.onError((err, c) => {
@@ -977,7 +979,7 @@ app.onError((err, c) => {
     }, 500)
   }
 
-  return c.json({ success: false, error: 'Internal Server Error' }, 500)
+  return c.json({ success: false, error: 'Internal Server Error' } as ApiErrorResponse, 500)
 })
 
 // Export

@@ -1,5 +1,5 @@
 import app from '../../src/index'
-import type { Env } from '../../src/types'
+import type { AuthLoginResponse, Env } from '../../src/types'
 import { createMockD1, createMockKV, createMockR2 } from '../setup'
 
 export type BootstrapRole = 'admin' | 'operator' | 'viewer'
@@ -46,7 +46,7 @@ export async function bootstrapUser(env: Env, email: string, password: string, r
     body: JSON.stringify({ email, password }),
   }, env)
 
-  const data = await loginRes.json() as { data?: { access_token?: string } }
+  const data = await loginRes.json() as AuthLoginResponse
 
   return {
     email,

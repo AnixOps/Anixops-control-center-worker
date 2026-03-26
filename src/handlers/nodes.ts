@@ -1,6 +1,23 @@
 import type { Context } from 'hono'
 import { z } from 'zod'
-import type { Env, Node } from '../types'
+import type {
+  ApiErrorResponse,
+  ApiMessageResponse,
+  Env,
+  Node,
+  NodeActionResponse,
+  NodeBulkActionResponse,
+  NodeConnectionTestResponse,
+  NodeCreateResponse,
+  NodeDeleteResponse,
+  NodeGetResponse,
+  NodeLogsResponse,
+  NodeStatsResponse,
+  NodeSummaryResponse,
+  NodeSyncResponse,
+  NodeUpdateResponse,
+  SchemaValidationErrorResponse,
+} from '../types'
 import { logAudit } from '../utils/audit'
 import { buildNodeChannels, makeRealtimeEvent, publishRealtimeEvent } from '../services/realtime'
 
@@ -8,7 +25,7 @@ const createNodeSchema = z.object({
   name: z.string().min(1).max(100),
   host: z.string().min(1),
   port: z.number().int().min(1).max(65535).default(22),
-  config: z.record(z.unknown()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
 })
 
 const updateNodeSchema = z.object({
@@ -16,7 +33,7 @@ const updateNodeSchema = z.object({
   host: z.string().min(1).optional(),
   port: z.number().int().min(1).max(65535).optional(),
   status: z.enum(['online', 'offline', 'maintenance']).optional(),
-  config: z.record(z.unknown()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
 })
 
 /**
@@ -60,7 +77,7 @@ export async function listNodesHandler(c: Context<{ Bindings: Env }>) {
       per_page: perPage,
       total_pages: Math.ceil((countResult?.total || 0) / perPage),
     },
-  })
+  } as NodeSummaryResponse)
 }
 
 /**
@@ -75,7 +92,7 @@ export async function getNodeHandler(c: Context<{ Bindings: Env }>) {
     .first<Node>()
 
   if (!node) {
-    return c.json({ success: false, error: 'Node not found' }, 404)
+    return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({
@@ -100,7 +117,7 @@ export async function createNodeHandler(c: Context<{ Bindings: Env }>) {
       .first()
 
     if (existing) {
-      return c.json({ success: false, error: 'Node name already exists' }, 409)
+      return c.json({ success: false, error: 'Node name already exists' } as ApiErrorResponse, 409)
     }
 
     const result = await c.env.DB
@@ -147,7 +164,7 @@ export async function createNodeHandler(c: Context<{ Bindings: Env }>) {
     }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -171,7 +188,7 @@ export async function updateNodeHandler(c: Context<{ Bindings: Env }>) {
       .first()
 
     if (!existing) {
-      return c.json({ success: false, error: 'Node not found' }, 404)
+      return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
     }
 
     // 构建更新语句
@@ -200,7 +217,7 @@ export async function updateNodeHandler(c: Context<{ Bindings: Env }>) {
     }
 
     if (updates.length === 0) {
-      return c.json({ success: false, error: 'No fields to update' }, 400)
+      return c.json({ success: false, error: 'No fields to update' } as ApiErrorResponse, 400)
     }
 
     updates.push('updated_at = datetime(\'now\')')
@@ -240,7 +257,7 @@ export async function updateNodeHandler(c: Context<{ Bindings: Env }>) {
     })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -259,7 +276,7 @@ export async function deleteNodeHandler(c: Context<{ Bindings: Env }>) {
     .first()
 
   if (!result) {
-    return c.json({ success: false, error: 'Node not found' }, 404)
+    return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
   }
 
   await logAudit(c, user.sub, 'delete_node', 'node', { node_id: id })
@@ -283,7 +300,7 @@ export async function deleteNodeHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     message: 'Node deleted successfully',
-  })
+  } as NodeDeleteResponse)
 }
 
 /**
@@ -299,7 +316,7 @@ export async function startNodeHandler(c: Context<{ Bindings: Env }>) {
     .first<Node>()
 
   if (!node) {
-    return c.json({ success: false, error: 'Node not found' }, 404)
+    return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
   }
 
   // 更新状态为启动中
@@ -339,7 +356,7 @@ export async function startNodeHandler(c: Context<{ Bindings: Env }>) {
     success: true,
     message: 'Node start initiated',
     data: { id, status: 'starting' },
-  })
+  } as NodeActionResponse)
 }
 
 /**
@@ -355,7 +372,7 @@ export async function stopNodeHandler(c: Context<{ Bindings: Env }>) {
     .first<Node>()
 
   if (!node) {
-    return c.json({ success: false, error: 'Node not found' }, 404)
+    return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
   }
 
   // 更新状态为停止中
@@ -394,7 +411,7 @@ export async function stopNodeHandler(c: Context<{ Bindings: Env }>) {
     success: true,
     message: 'Node stop initiated',
     data: { id, status: 'stopping' },
-  })
+  } as NodeActionResponse)
 }
 
 /**
@@ -410,7 +427,7 @@ export async function restartNodeHandler(c: Context<{ Bindings: Env }>) {
     .first<Node>()
 
   if (!node) {
-    return c.json({ success: false, error: 'Node not found' }, 404)
+    return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
   }
 
   // 更新状态为重启中
@@ -449,7 +466,7 @@ export async function restartNodeHandler(c: Context<{ Bindings: Env }>) {
     success: true,
     message: 'Node restart initiated',
     data: { id, status: 'restarting' },
-  })
+  } as NodeActionResponse)
 }
 
 /**
@@ -464,7 +481,7 @@ export async function getNodeStatsHandler(c: Context<{ Bindings: Env }>) {
     .first<Node>()
 
   if (!node) {
-    return c.json({ success: false, error: 'Node not found' }, 404)
+    return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
   }
 
   // 从KV获取缓存的统计数据，或者生成模拟数据
@@ -474,7 +491,7 @@ export async function getNodeStatsHandler(c: Context<{ Bindings: Env }>) {
     return c.json({
       success: true,
       data: cachedStats,
-    })
+    } as NodeStatsResponse)
   }
 
   // 生成模拟统计数据
@@ -500,7 +517,7 @@ export async function getNodeStatsHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     data: stats,
-  })
+  } as NodeStatsResponse)
 }
 
 /**
@@ -517,7 +534,7 @@ export async function getNodeLogsHandler(c: Context<{ Bindings: Env }>) {
     .first<Node>()
 
   if (!node) {
-    return c.json({ success: false, error: 'Node not found' }, 404)
+    return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
   }
 
   // 从KV获取日志
@@ -546,7 +563,7 @@ export async function getNodeLogsHandler(c: Context<{ Bindings: Env }>) {
       logs,
       total: logs.length,
     },
-  })
+  } as NodeLogsResponse)
 }
 
 /**
@@ -562,7 +579,7 @@ export async function testNodeConnectionHandler(c: Context<{ Bindings: Env }>) {
     .first<Node>()
 
   if (!node) {
-    return c.json({ success: false, error: 'Node not found' }, 404)
+    return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
   }
 
   // 模拟连接测试
@@ -607,7 +624,7 @@ export async function testNodeConnectionHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     data: result,
-  })
+  } as NodeConnectionTestResponse)
 }
 
 /**
@@ -623,7 +640,7 @@ export async function syncNodeHandler(c: Context<{ Bindings: Env }>) {
     .first<Node>()
 
   if (!node) {
-    return c.json({ success: false, error: 'Node not found' }, 404)
+    return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
   }
 
   await logAudit(c, user.sub, 'sync_node', 'node', { node_id: id, node_name: node.name })

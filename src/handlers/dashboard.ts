@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
-import type { Env } from '../types'
+import type { DashboardOverviewData, DashboardOverviewResponseData, Env, DeveloperReadinessSummary } from '../types'
+import { buildDeveloperReadinessSummary } from '../services/monitoring'
 
 /**
  * Dashboard 概览
@@ -14,10 +15,17 @@ export async function dashboardHandler(c: Context<{ Bindings: Env }>) {
       success: true,
       data: JSON.parse(cached),
       cached: true,
-    })
+    } as DashboardOverviewResponseData)
   }
 
-  // 获取统计数据
+  let developerReadinessSummary: DeveloperReadinessSummary | null = null
+  try {
+    developerReadinessSummary = await buildDeveloperReadinessSummary()
+  } catch (error) {
+    console.error('Failed to build developer readiness summary:', error)
+    developerReadinessSummary = null
+  }
+
   const [nodeCount, userCount, auditCount] = await Promise.all([
     c.env.DB.prepare('SELECT COUNT(*) as count FROM nodes').first<{ count: number }>(),
     c.env.DB.prepare('SELECT COUNT(*) as count FROM users WHERE enabled = 1').first<{ count: number }>(),
@@ -29,7 +37,7 @@ export async function dashboardHandler(c: Context<{ Bindings: Env }>) {
     .prepare('SELECT status, COUNT(*) as count FROM nodes GROUP BY status')
     .all<{ status: string; count: number }>()
 
-  const data = {
+  const data: DashboardOverviewData = {
     nodes: {
       total: nodeCount?.count || 0,
       online: nodeStatus.results.find(r => r.status === 'online')?.count || 0,
@@ -42,6 +50,7 @@ export async function dashboardHandler(c: Context<{ Bindings: Env }>) {
     activity: {
       last_24h: auditCount?.count || 0,
     },
+    developer_readiness_summary: developerReadinessSummary,
     timestamp: new Date().toISOString(),
   }
 
@@ -51,7 +60,8 @@ export async function dashboardHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     data,
-  })
+    cached: false,
+  } as DashboardOverviewResponseData)
 }
 
 /**

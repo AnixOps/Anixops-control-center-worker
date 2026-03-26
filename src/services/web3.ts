@@ -4,7 +4,7 @@
  */
 
 import type { Context } from 'hono'
-import type { Env } from '../types'
+import type { ApiErrorResponse, ApiSuccessResponse, Env } from '../types'
 
 // ==================== IPFS Gateway ====================
 
@@ -329,7 +329,7 @@ export async function ipfsUploadHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json<{ data: string; filename?: string }>()
 
   if (!body.data) {
-    return c.json({ success: false, error: 'Data is required' }, 400)
+    return c.json({ success: false, error: 'Data is required' } as ApiErrorResponse, 400)
   }
 
   const result = await uploadToIPFS(c.env, body.data, {
@@ -344,10 +344,10 @@ export async function ipfsUploadHandler(c: Context<{ Bindings: Env }>) {
         cid: result.cid,
         gatewayUrl: result.gatewayUrl,
       },
-    })
+    } as ApiSuccessResponse<unknown>)
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }
 
 /**
@@ -357,7 +357,7 @@ export async function ipfsGetHandler(c: Context<{ Bindings: Env }>) {
   const cid = c.req.param('cid') as string
 
   if (!cid) {
-    return c.json({ success: false, error: 'CID is required' }, 400)
+    return c.json({ success: false, error: 'CID is required' } as ApiErrorResponse, 400)
   }
 
   const result = await getFromIPFS(c.env, cid)
@@ -368,7 +368,7 @@ export async function ipfsGetHandler(c: Context<{ Bindings: Env }>) {
     })
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }
 
 /**
@@ -378,7 +378,7 @@ export async function web3ChallengeHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json<{ address: string }>()
 
   if (!body.address || !isValidEthereumAddress(body.address)) {
-    return c.json({ success: false, error: 'Valid Ethereum address is required' }, 400)
+    return c.json({ success: false, error: 'Valid Ethereum address is required' } as ApiErrorResponse, 400)
   }
 
   const nonce = generateNonce()
@@ -395,7 +395,7 @@ export async function web3ChallengeHandler(c: Context<{ Bindings: Env }>) {
       message,
       nonce,
     },
-  })
+  } as ApiSuccessResponse<unknown>)
 }
 
 /**
@@ -405,14 +405,14 @@ export async function web3VerifyHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json<{ address: string; signature: string; message: string }>()
 
   if (!body.address || !body.signature || !body.message) {
-    return c.json({ success: false, error: 'Address, signature, and message are required' }, 400)
+    return c.json({ success: false, error: 'Address, signature, and message are required' } as ApiErrorResponse, 400)
   }
 
   // 验证签名
   const verifyResult = await verifyEthereumSignature(body.message, body.signature, body.address)
 
   if (!verifyResult.success || !verifyResult.isValid) {
-    return c.json({ success: false, error: 'Invalid signature' }, 401)
+    return c.json({ success: false, error: 'Invalid signature' } as ApiErrorResponse, 401)
   }
 
   // 清除 nonce
@@ -425,7 +425,7 @@ export async function web3VerifyHandler(c: Context<{ Bindings: Env }>) {
       address: body.address,
       did: createDID(body.address),
     },
-  })
+  } as ApiSuccessResponse<unknown>)
 }
 
 /**
@@ -440,7 +440,7 @@ export async function web3AuditHandler(c: Context<{ Bindings: Env }>) {
   }>()
 
   if (!body.action || !body.userId) {
-    return c.json({ success: false, error: 'Action and userId are required' }, 400)
+    return c.json({ success: false, error: 'Action and userId are required' } as ApiErrorResponse, 400)
   }
 
   const result = await storeAuditOnChain(c.env, body)
@@ -452,8 +452,8 @@ export async function web3AuditHandler(c: Context<{ Bindings: Env }>) {
         txHash: result.txHash,
         ipfsCid: result.ipfsCid,
       },
-    })
+    } as ApiSuccessResponse<unknown>)
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }

@@ -1,6 +1,15 @@
 import type { Context } from 'hono'
 import { z } from 'zod'
-import type { Env } from '../types'
+import type {
+  Env,
+  Notification,
+  NotificationCreateResponse,
+  NotificationListResponse,
+  NotificationUnreadCountResponse,
+  ApiErrorResponse,
+  ApiMessageResponse,
+  SchemaValidationErrorResponse,
+} from '../types'
 import { logAudit } from '../utils/audit'
 import { buildChannels, makeRealtimeEvent, publishRealtimeEvent } from '../services/realtime'
 
@@ -60,14 +69,14 @@ export async function listNotificationsHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     data: {
-      items: result.results,
+      items: result.results as unknown as Notification[],
       total: countResult?.total || 0,
       page,
       per_page: perPage,
       total_pages: Math.ceil((countResult?.total || 0) / perPage),
       unread_count: unreadResult?.count || 0,
     },
-  })
+  } as NotificationListResponse)
 }
 
 /**
@@ -89,7 +98,7 @@ export async function markNotificationReadHandler(c: Context<{ Bindings: Env }>)
   return c.json({
     success: true,
     message: 'Notification marked as read',
-  })
+  } as ApiMessageResponse)
 }
 
 /**
@@ -118,7 +127,7 @@ export async function markAllNotificationsReadHandler(c: Context<{ Bindings: Env
   return c.json({
     success: true,
     message: 'All notifications marked as read',
-  })
+  } as ApiMessageResponse)
 }
 
 /**
@@ -153,7 +162,7 @@ export async function deleteNotificationHandler(c: Context<{ Bindings: Env }>) {
   return c.json({
     success: true,
     message: 'Notification deleted',
-  })
+  } as ApiMessageResponse)
 }
 
 /**
@@ -209,7 +218,7 @@ export async function createNotificationHandler(c: Context<{ Bindings: Env }>) {
     }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -231,7 +240,7 @@ export async function getUnreadCountHandler(c: Context<{ Bindings: Env }>) {
     data: {
       unread_count: result?.count || 0,
     },
-  })
+  } as NotificationUnreadCountResponse)
 }
 
 /**

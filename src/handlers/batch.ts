@@ -6,7 +6,14 @@
 
 import type { Context } from 'hono'
 import { z } from 'zod'
-import type { Env } from '../types'
+import type {
+  ApiErrorResponse,
+  BatchNodeStatusResponse,
+  BatchOperationResult,
+  BatchOperationsResponse,
+  Env,
+  SchemaValidationErrorResponse,
+} from '../types'
 import { logAudit } from '../utils/audit'
 
 // Batch request schema
@@ -21,13 +28,7 @@ const batchRequestSchema = z.object({
 
 type BatchOperation = z.infer<typeof batchRequestSchema>['operations'][0]
 
-interface BatchResult {
-  path: string
-  status: number
-  success: boolean
-  data?: unknown
-  error?: string
-}
+type BatchResult = BatchOperationResult
 
 /**
  * Execute batch operations
@@ -92,7 +93,7 @@ export async function batchOperationsHandler(c: Context<{ Bindings: Env }>) {
       return c.json({
         success: false,
         error: 'Validation error',
-        details: err.errors,
+        details: err.issues,
       }, 400)
     }
 
@@ -332,7 +333,7 @@ export async function bulkNodeStatusHandler(c: Context<{ Bindings: Env }>) {
     })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     return c.json({ success: false, error: err instanceof Error ? err.message : 'Unknown error' }, 500)
   }

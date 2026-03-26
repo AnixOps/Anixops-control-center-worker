@@ -162,7 +162,7 @@ export async function prometheusMetricsHandler(c: Context<{ Bindings: Env }>) {
  */
 export async function detailedHealthHandler(c: Context<{ Bindings: Env }>) {
   const checks = await probeRuntimeServices(c.env)
-  const allHealthy = Object.values(checks).every(check => check.status === 'healthy')
+  const allHealthy = [checks.database, checks.kv, checks.r2].every(check => check.status === 'healthy')
 
   return c.json({
     status: allHealthy ? 'healthy' : 'degraded',

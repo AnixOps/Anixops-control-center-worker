@@ -3,7 +3,7 @@
  */
 
 import type { Context } from 'hono'
-import type { Env } from '../types'
+import type { ApiErrorResponse, Env } from '../types'
 import { logAudit } from '../utils/audit'
 import {
   indexLog,
@@ -59,7 +59,7 @@ export async function getLogHandler(c: Context<{ Bindings: Env }>) {
   const log = await getLogById(c.env, id)
 
   if (!log) {
-    return c.json({ success: false, error: 'Log not found' }, 404)
+    return c.json({ success: false, error: 'Log not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({ success: true, data: log })
@@ -72,7 +72,7 @@ export async function indexLogHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json()
 
   if (!body.level || !body.message || !body.service) {
-    return c.json({ success: false, error: 'level, message, and service required' }, 400)
+    return c.json({ success: false, error: 'level, message, and service required' } as ApiErrorResponse, 400)
   }
 
   const validLevels = ['debug', 'info', 'warn', 'error', 'fatal']
@@ -102,11 +102,11 @@ export async function bulkIndexLogsHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json()
 
   if (!Array.isArray(body.entries) || body.entries.length === 0) {
-    return c.json({ success: false, error: 'entries array required' }, 400)
+    return c.json({ success: false, error: 'entries array required' } as ApiErrorResponse, 400)
   }
 
   if (body.entries.length > 1000) {
-    return c.json({ success: false, error: 'Maximum 1000 entries per batch' }, 400)
+    return c.json({ success: false, error: 'Maximum 1000 entries per batch' } as ApiErrorResponse, 400)
   }
 
   const result = await bulkIndexLogs(c.env, body.entries)

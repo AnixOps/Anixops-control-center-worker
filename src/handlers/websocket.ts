@@ -4,7 +4,17 @@
  */
 
 import type { Context } from 'hono'
-import type { Env } from '../types'
+import type {
+  ApiErrorResponse,
+  Env,
+  RealtimeWebSocketBroadcastMessage,
+  RealtimeWebSocketErrorMessage,
+  RealtimeWebSocketInboundMessage,
+  RealtimeWebSocketOutboundMessage,
+  RealtimeWebSocketPongMessage,
+  RealtimeWebSocketSubscribedMessage,
+  RealtimeWebSocketUnsubscribedMessage,
+} from '../types'
 import {
   buildDefaultChannels,
   createRealtimeEvent,
@@ -18,18 +28,29 @@ import {
   updateRealtimeUserChannel,
 } from '../services/realtime'
 
+type RealtimeWebSocketReceivedMessage = RealtimeWebSocketInboundMessage | { type: string; payload?: unknown }
+
+function isRealtimeWebSocketInboundMessage(data: unknown): data is RealtimeWebSocketInboundMessage {
+  if (!data || typeof data !== 'object' || !('type' in data)) {
+    return false
+  }
+
+  const message = data as { type?: unknown }
+  return typeof message.type === 'string'
+}
+
 /**
  * WebSocket upgrade handler
  */
 export async function websocketHandler(c: Context<{ Bindings: Env }>) {
   const user = c.get('user')
   if (!user) {
-    return c.json({ success: false, error: 'Unauthorized' }, 401)
+    return c.json({ success: false, error: 'Unauthorized' } as ApiErrorResponse, 401)
   }
 
   const upgradeHeader = c.req.header('Upgrade')
   if (upgradeHeader?.toLowerCase() !== 'websocket') {
-    return c.json({ success: false, error: 'Expected WebSocket upgrade' }, 426)
+    return c.json({ success: false, error: 'Expected WebSocket upgrade' } as ApiErrorResponse, 426)
   }
 
   const tenant = c.get('tenant') as { id: number } | undefined
@@ -76,7 +97,7 @@ export async function websocketHandler(c: Context<{ Bindings: Env }>) {
   try {
     heartbeatInterval = setInterval(() => {
       try {
-        server.send(JSON.stringify({ type: 'ping' }))
+        sendWebSocketMessage(server, { type: 'ping' })
       } catch {
         if (heartbeatInterval) {
           clearInterval(heartbeatInterval)
@@ -88,12 +109,13 @@ export async function websocketHandler(c: Context<{ Bindings: Env }>) {
   }
 
   server.addEventListener('message', (event: MessageEvent) => {
-    try {
-      const data = JSON.parse(event.data as string) as { type: string; payload?: unknown }
-      handleWebSocketMessage(server, clientId, user.sub, data, tenant?.id)
-    } catch {
-      server.send(JSON.stringify({ type: 'error', payload: 'Invalid message format' }))
+    const data = parseWebSocketMessage(event.data as string)
+    if (!data) {
+      sendWebSocketMessage(server, { type: 'error', payload: 'Invalid message format' })
+      return
     }
+
+    handleWebSocketMessage(server, clientId, user.sub, data, tenant?.id)
   })
 
   const cleanup = () => {
@@ -112,11 +134,24 @@ export async function websocketHandler(c: Context<{ Bindings: Env }>) {
   })
 }
 
+function parseWebSocketMessage(data: string): RealtimeWebSocketReceivedMessage | null {
+  try {
+    const parsed = JSON.parse(data) as unknown
+    return isRealtimeWebSocketInboundMessage(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function sendWebSocketMessage(ws: WebSocket, message: RealtimeWebSocketOutboundMessage) {
+  ws.send(JSON.stringify(message))
+}
+
 function handleWebSocketMessage(
   ws: WebSocket,
   clientId: string,
   userId: number,
-  data: { type: string; payload?: unknown },
+  data: RealtimeWebSocketReceivedMessage,
   tenantId?: number
 ) {
   switch (data.type) {
@@ -124,53 +159,53 @@ function handleWebSocketMessage(
       break
 
     case 'ping':
-      ws.send(JSON.stringify({ type: 'pong' }))
+      sendWebSocketMessage(ws, { type: 'pong' } as RealtimeWebSocketPongMessage)
       break
 
     case 'subscribe': {
       if (typeof data.payload !== 'string') {
-        ws.send(JSON.stringify({ type: 'error', payload: 'Invalid subscription payload' }))
+        sendWebSocketMessage(ws, { type: 'error', payload: 'Invalid subscription payload' } as RealtimeWebSocketErrorMessage)
         break
       }
 
       const channel = data.payload.trim()
       if (!isAllowedRealtimeChannel({ sub: userId, role: 'viewer' }, channel, tenantId)) {
-        ws.send(JSON.stringify({ type: 'error', payload: `Invalid channel: ${channel}` }))
+        sendWebSocketMessage(ws, { type: 'error', payload: `Invalid channel: ${channel}` } as RealtimeWebSocketErrorMessage)
         break
       }
 
       const changed = updateRealtimeUserChannel(userId, channel, 'subscribe')
-      ws.send(JSON.stringify({
+      sendWebSocketMessage(ws, {
         type: 'subscribed',
         payload: {
           channel,
           changed,
         },
-      }))
+      } as RealtimeWebSocketSubscribedMessage)
       break
     }
 
     case 'unsubscribe': {
       if (typeof data.payload !== 'string') {
-        ws.send(JSON.stringify({ type: 'error', payload: 'Invalid subscription payload' }))
+        sendWebSocketMessage(ws, { type: 'error', payload: 'Invalid subscription payload' } as RealtimeWebSocketErrorMessage)
         break
       }
 
       const channel = data.payload.trim()
       const changed = updateRealtimeUserChannel(userId, channel, 'unsubscribe')
-      ws.send(JSON.stringify({
+      sendWebSocketMessage(ws, {
         type: 'unsubscribed',
         payload: {
           channel,
           changed,
         },
-      }))
+      } as RealtimeWebSocketUnsubscribedMessage)
       break
     }
 
     case 'broadcast': {
       if (data.payload && typeof data.payload === 'object') {
-        ws.send(JSON.stringify({
+        sendWebSocketMessage(ws, {
           type: 'message',
           payload: {
             ...data.payload as Record<string, unknown>,
@@ -178,13 +213,13 @@ function handleWebSocketMessage(
             clientId,
           },
           timestamp: new Date().toISOString(),
-        }))
+        } as RealtimeWebSocketBroadcastMessage)
       }
       break
     }
 
     default:
-      ws.send(JSON.stringify({ type: 'error', payload: `Unknown message type: ${data.type}` }))
+      sendWebSocketMessage(ws, { type: 'error', payload: `Unknown message type: ${data.type}` } as RealtimeWebSocketErrorMessage)
   }
 }
 

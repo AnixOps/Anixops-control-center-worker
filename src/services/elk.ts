@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { ApiErrorResponse, ApiSuccessResponse } from '../types'
 
 const elk = new Hono()
 
@@ -188,7 +189,7 @@ elk.post('/indices/templates', async (c) => {
   const { name, index_patterns, settings, mappings } = body
 
   if (!name || !index_patterns) {
-    return c.json({ error: 'Name and index_patterns are required' }, 400)
+    return c.json({ success: false, error: 'Name and index_patterns are required' } as ApiErrorResponse, 400)
   }
 
   indexTemplates[name] = {
@@ -215,7 +216,7 @@ elk.post('/ilm/policies', async (c) => {
   const { name, phases } = body
 
   if (!name || !phases) {
-    return c.json({ error: 'Name and phases are required' }, 400)
+    return c.json({ success: false, error: 'Name and phases are required' } as ApiErrorResponse, 400)
   }
 
   ilmPolicies[name] = { policy: { phases } }
@@ -238,7 +239,7 @@ elk.get('/logstash/pipelines/:name', (c) => {
   const pipeline = logstashPipelines[name]
 
   if (!pipeline) {
-    return c.json({ error: 'Pipeline not found' }, 404)
+    return c.json({ success: false, error: 'Pipeline not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({ name, ...pipeline })

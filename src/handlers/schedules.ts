@@ -9,7 +9,7 @@ const createScheduleSchema = z.object({
   cron: z.string().min(1),
   timezone: z.string().default('UTC'),
   target_nodes: z.array(z.union([z.number(), z.string()])).min(1),
-  variables: z.record(z.unknown()).optional(),
+  variables: z.record(z.string(), z.unknown()).optional(),
   enabled: z.boolean().default(true),
 })
 
@@ -18,7 +18,7 @@ const updateScheduleSchema = z.object({
   cron: z.string().min(1).optional(),
   timezone: z.string().optional(),
   target_nodes: z.array(z.union([z.number(), z.string()])).min(1).optional(),
-  variables: z.record(z.unknown()).optional(),
+  variables: z.record(z.string(), z.unknown()).optional(),
   enabled: z.boolean().optional(),
 })
 
@@ -172,7 +172,7 @@ export async function createScheduleHandler(c: Context<{ Bindings: Env }>) {
     }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -251,7 +251,7 @@ export async function updateScheduleHandler(c: Context<{ Bindings: Env }>) {
     })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }

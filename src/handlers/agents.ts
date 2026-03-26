@@ -4,7 +4,17 @@
  */
 
 import type { Context } from 'hono'
-import type { Env } from '../types'
+import type {
+  AgentCommandResultResponse,
+  AgentHeartbeatResponse,
+  AgentMetricsResponse,
+  AgentRegisterResponse,
+  AgentSendCommandResponse,
+  AgentStoreMetricsResponse,
+  ApiErrorResponse,
+  Env,
+  SchemaValidationErrorResponse,
+} from '../types'
 import { z } from 'zod'
 import { logAudit } from '../utils/audit'
 import { buildNodeChannels, makeRealtimeEvent, publishRealtimeEvent } from '../services/realtime'
@@ -17,7 +27,7 @@ const registerAgentSchema = z.object({
   os: z.string().optional(),
   arch: z.string().optional(),
   version: z.string().optional(),
-  labels: z.record(z.string()).optional(),
+  labels: z.record(z.string(), z.string()).optional(),
   cpu_count: z.number().optional(),
   memory_gb: z.number().optional(),
   disk_gb: z.number().optional(),
@@ -68,7 +78,7 @@ export async function registerAgentHandler(c: Context<{ Bindings: Env }>) {
       .first<{ id: number; name: string; agent_secret: string }>()
 
     if (!node) {
-      return c.json({ success: false, error: 'Invalid agent credentials' }, 401)
+      return c.json({ success: false, error: 'Invalid agent credentials' } as ApiErrorResponse, 401)
     }
 
     // Update node with agent info
@@ -136,10 +146,10 @@ export async function registerAgentHandler(c: Context<{ Bindings: Env }>) {
         heartbeat_interval: 30,
         metrics_interval: 60,
       },
-    })
+    } as AgentRegisterResponse)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -158,7 +168,7 @@ export async function agentHeartbeatHandler(c: Context<{ Bindings: Env }>) {
     const agentSecret = c.req.header('X-Agent-Secret')
 
     if (!agentId || !agentSecret) {
-      return c.json({ success: false, error: 'Missing agent credentials' }, 401)
+      return c.json({ success: false, error: 'Missing agent credentials' } as ApiErrorResponse, 401)
     }
 
     // Verify agent credentials
@@ -171,7 +181,7 @@ export async function agentHeartbeatHandler(c: Context<{ Bindings: Env }>) {
       .first<{ id: number; agent_secret: string }>()
 
     if (!node || node.agent_secret !== agentSecret) {
-      return c.json({ success: false, error: 'Invalid agent credentials' }, 401)
+      return c.json({ success: false, error: 'Invalid agent credentials' } as ApiErrorResponse, 401)
     }
 
     // Update node status
@@ -222,10 +232,10 @@ export async function agentHeartbeatHandler(c: Context<{ Bindings: Env }>) {
         received: true,
         commands: pendingCommands || [],
       },
-    })
+    } as AgentHeartbeatResponse)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -244,7 +254,7 @@ export async function agentMetricsHandler(c: Context<{ Bindings: Env }>) {
     const agentSecret = c.req.header('X-Agent-Secret')
 
     if (!agentId || !agentSecret) {
-      return c.json({ success: false, error: 'Missing agent credentials' }, 401)
+      return c.json({ success: false, error: 'Missing agent credentials' } as ApiErrorResponse, 401)
     }
 
     // Verify agent credentials
@@ -254,7 +264,7 @@ export async function agentMetricsHandler(c: Context<{ Bindings: Env }>) {
       .first<{ id: number; agent_secret: string }>()
 
     if (!node || node.agent_secret !== agentSecret) {
-      return c.json({ success: false, error: 'Invalid agent credentials' }, 401)
+      return c.json({ success: false, error: 'Invalid agent credentials' } as ApiErrorResponse, 401)
     }
 
     // Store metrics in KV (keep last 24 hours)
@@ -301,10 +311,10 @@ export async function agentMetricsHandler(c: Context<{ Bindings: Env }>) {
       }
     ))
 
-    return c.json({ success: true, data: { stored: true } })
+    return c.json({ success: true, data: { stored: true } } as AgentStoreMetricsResponse)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as SchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -321,7 +331,7 @@ export async function agentCommandResultHandler(c: Context<{ Bindings: Env }>) {
     const agentSecret = c.req.header('X-Agent-Secret')
 
     if (!agentId || !agentSecret) {
-      return c.json({ success: false, error: 'Missing agent credentials' }, 401)
+      return c.json({ success: false, error: 'Missing agent credentials' } as ApiErrorResponse, 401)
     }
 
     // Verify agent credentials
@@ -331,7 +341,7 @@ export async function agentCommandResultHandler(c: Context<{ Bindings: Env }>) {
       .first<{ id: number; agent_secret: string }>()
 
     if (!node || node.agent_secret !== agentSecret) {
-      return c.json({ success: false, error: 'Invalid agent credentials' }, 401)
+      return c.json({ success: false, error: 'Invalid agent credentials' } as ApiErrorResponse, 401)
     }
 
     const body = await c.req.json<{
@@ -382,7 +392,7 @@ export async function agentCommandResultHandler(c: Context<{ Bindings: Env }>) {
       }
     ))
 
-    return c.json({ success: true, data: { received: true } })
+    return c.json({ success: true, data: { received: true } } as AgentCommandResultResponse)
   } catch (err) {
     throw err
   }
@@ -395,7 +405,7 @@ export async function sendAgentCommandHandler(c: Context<{ Bindings: Env }>) {
   const user = c.get('user')
 
   if (user.role !== 'admin' && user.role !== 'operator') {
-    return c.json({ success: false, error: 'Forbidden' }, 403)
+    return c.json({ success: false, error: 'Forbidden' } as ApiErrorResponse, 403)
   }
 
   try {
@@ -407,7 +417,7 @@ export async function sendAgentCommandHandler(c: Context<{ Bindings: Env }>) {
     }>()
 
     if (!agentId) {
-      return c.json({ success: false, error: 'Agent ID is required' }, 400)
+      return c.json({ success: false, error: 'Agent ID is required' } as ApiErrorResponse, 400)
     }
 
     // Check if agent exists
@@ -417,7 +427,7 @@ export async function sendAgentCommandHandler(c: Context<{ Bindings: Env }>) {
       .first<{ id: number; status: string }>()
 
     if (!node) {
-      return c.json({ success: false, error: 'Agent not found' }, 404)
+      return c.json({ success: false, error: 'Agent not found' } as ApiErrorResponse, 404)
     }
 
     // Generate command ID
@@ -471,7 +481,7 @@ export async function sendAgentCommandHandler(c: Context<{ Bindings: Env }>) {
         command_id: commandId,
         status: 'queued',
       },
-    })
+    } as AgentSendCommandResponse)
   } catch (err) {
     throw err
   }
@@ -484,7 +494,7 @@ export async function getAgentMetricsHandler(c: Context<{ Bindings: Env }>) {
   const agentId = c.req.param('agentId') as string
 
   if (!agentId) {
-    return c.json({ success: false, error: 'Agent ID is required' }, 400)
+    return c.json({ success: false, error: 'Agent ID is required' } as ApiErrorResponse, 400)
   }
 
   const range = c.req.query('range') || '1h'
@@ -499,7 +509,7 @@ export async function getAgentMetricsHandler(c: Context<{ Bindings: Env }>) {
         agent_id: agentId,
         metrics: [],
       },
-    })
+    } as AgentMetricsResponse)
   }
 
   // Filter by time range
@@ -543,13 +553,13 @@ export async function generateInstallScriptHandler(c: Context<{ Bindings: Env }>
   const user = c.get('user')
 
   if (user.role !== 'admin' && user.role !== 'operator') {
-    return c.json({ success: false, error: 'Forbidden' }, 403)
+    return c.json({ success: false, error: 'Forbidden' } as ApiErrorResponse, 403)
   }
 
   const nodeId = c.req.param('nodeId') as string
 
   if (!nodeId) {
-    return c.json({ success: false, error: 'Node ID is required' }, 400)
+    return c.json({ success: false, error: 'Node ID is required' } as ApiErrorResponse, 400)
   }
 
   // Get node info
@@ -559,7 +569,7 @@ export async function generateInstallScriptHandler(c: Context<{ Bindings: Env }>
     .first<{ id: number; name: string; agent_id: string | null; agent_secret: string | null }>()
 
   if (!node) {
-    return c.json({ success: false, error: 'Node not found' }, 404)
+    return c.json({ success: false, error: 'Node not found' } as ApiErrorResponse, 404)
   }
 
   // Generate agent ID and secret if not exists

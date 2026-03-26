@@ -3,7 +3,7 @@
  */
 
 import type { Context } from 'hono'
-import type { Env } from '../types'
+import type { ApiErrorResponse, Env } from '../types'
 import { createBackup, listBackups, getBackup, deleteBackup, getLatestBackupStatus, cleanupOldBackups, restoreBackup } from '../services/backup'
 import { logAudit } from '../utils/audit'
 
@@ -15,7 +15,7 @@ export async function createBackupHandler(c: Context<{ Bindings: Env }>) {
 
   // 只有管理员可以创建备份
   if (user.role !== 'admin') {
-    return c.json({ success: false, error: 'Forbidden: Admin only' }, 403)
+    return c.json({ success: false, error: 'Forbidden: Admin only' } as ApiErrorResponse, 403)
   }
 
   const result = await createBackup(c.env)
@@ -48,7 +48,7 @@ export async function listBackupsHandler(c: Context<{ Bindings: Env }>) {
 
   // 只有管理员可以查看备份
   if (user.role !== 'admin') {
-    return c.json({ success: false, error: 'Forbidden: Admin only' }, 403)
+    return c.json({ success: false, error: 'Forbidden: Admin only' } as ApiErrorResponse, 403)
   }
 
   const limit = parseInt(c.req.query('limit') || '20', 10)
@@ -72,18 +72,18 @@ export async function getBackupHandler(c: Context<{ Bindings: Env }>) {
   const user = c.get('user')
 
   if (user.role !== 'admin') {
-    return c.json({ success: false, error: 'Forbidden: Admin only' }, 403)
+    return c.json({ success: false, error: 'Forbidden: Admin only' } as ApiErrorResponse, 403)
   }
 
   const backupId = c.req.param('id') as string
   if (!backupId) {
-    return c.json({ success: false, error: 'Backup ID is required' }, 400)
+    return c.json({ success: false, error: 'Backup ID is required' } as ApiErrorResponse, 400)
   }
 
   const backup = await getBackup(c.env, backupId)
 
   if (!backup) {
-    return c.json({ success: false, error: 'Backup not found' }, 404)
+    return c.json({ success: false, error: 'Backup not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({
@@ -99,18 +99,18 @@ export async function deleteBackupHandler(c: Context<{ Bindings: Env }>) {
   const user = c.get('user')
 
   if (user.role !== 'admin') {
-    return c.json({ success: false, error: 'Forbidden: Admin only' }, 403)
+    return c.json({ success: false, error: 'Forbidden: Admin only' } as ApiErrorResponse, 403)
   }
 
   const backupId = c.req.param('id') as string
   if (!backupId) {
-    return c.json({ success: false, error: 'Backup ID is required' }, 400)
+    return c.json({ success: false, error: 'Backup ID is required' } as ApiErrorResponse, 400)
   }
 
   const success = await deleteBackup(c.env, backupId)
 
   if (!success) {
-    return c.json({ success: false, error: 'Failed to delete backup' }, 500)
+    return c.json({ success: false, error: 'Failed to delete backup' } as ApiErrorResponse, 500)
   }
 
   await logAudit(c, user.sub, 'delete_backup', 'backup', { backup_id: backupId })
@@ -128,18 +128,18 @@ export async function downloadBackupHandler(c: Context<{ Bindings: Env }>) {
   const user = c.get('user')
 
   if (user.role !== 'admin') {
-    return c.json({ success: false, error: 'Forbidden: Admin only' }, 403)
+    return c.json({ success: false, error: 'Forbidden: Admin only' } as ApiErrorResponse, 403)
   }
 
   const backupId = c.req.param('id') as string
   if (!backupId) {
-    return c.json({ success: false, error: 'Backup ID is required' }, 400)
+    return c.json({ success: false, error: 'Backup ID is required' } as ApiErrorResponse, 400)
   }
 
   const object = await c.env.R2.get(`backups/d1/${backupId}.json`)
 
   if (!object) {
-    return c.json({ success: false, error: 'Backup not found' }, 404)
+    return c.json({ success: false, error: 'Backup not found' } as ApiErrorResponse, 404)
   }
 
   const data = await object.text()
@@ -159,12 +159,12 @@ export async function restoreBackupHandler(c: Context<{ Bindings: Env }>) {
   const user = c.get('user')
 
   if (user.role !== 'admin') {
-    return c.json({ success: false, error: 'Forbidden: Admin only' }, 403)
+    return c.json({ success: false, error: 'Forbidden: Admin only' } as ApiErrorResponse, 403)
   }
 
   const backupId = c.req.param('id') as string
   if (!backupId) {
-    return c.json({ success: false, error: 'Backup ID is required' }, 400)
+    return c.json({ success: false, error: 'Backup ID is required' } as ApiErrorResponse, 400)
   }
 
   const body = await c.req.json<{ tables?: string[]; truncate?: boolean }>().catch(() => ({}))
@@ -198,7 +198,7 @@ export async function cleanupBackupsHandler(c: Context<{ Bindings: Env }>) {
   const user = c.get('user')
 
   if (user.role !== 'admin') {
-    return c.json({ success: false, error: 'Forbidden: Admin only' }, 403)
+    return c.json({ success: false, error: 'Forbidden: Admin only' } as ApiErrorResponse, 403)
   }
 
   const keepCount = parseInt(c.req.query('keep') || '30', 10)
@@ -223,7 +223,7 @@ export async function backupStatusHandler(c: Context<{ Bindings: Env }>) {
   const user = c.get('user')
 
   if (user.role !== 'admin') {
-    return c.json({ success: false, error: 'Forbidden: Admin only' }, 403)
+    return c.json({ success: false, error: 'Forbidden: Admin only' } as ApiErrorResponse, 403)
   }
 
   const latestBackup = await getLatestBackupStatus(c.env)

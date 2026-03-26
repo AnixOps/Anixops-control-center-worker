@@ -10,11 +10,11 @@
 
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 import app from '../src/index'
-import type { Env } from '../src/types'
+import type { ApiErrorResponse, AuthLoginResponse, AuthMeResponse, AuthRefreshResponse, AuthRegisterResponse, DashboardOverviewResponseData, DeveloperReadinessSummaryResponseData, Env, HealthResponse, ReadinessResponse } from '../src/types'
 import { createMockKV, createMockR2, createMockD1 } from '../test/setup'
 
 // Create test environment with shared mocks
-function createTestEnv(): Env {
+function createTestEnv(overrides: Partial<Env> = {}): Env {
   return {
     ENVIRONMENT: 'development',
     JWT_SECRET: 'test-secret-key-for-e2e-tests-min-32-characters!',
@@ -26,6 +26,7 @@ function createTestEnv(): Env {
     AI: {
       run: async () => ({ response: '{"result":"ok"}' }),
     } as Env['AI'],
+    ...overrides,
   }
 }
 
@@ -39,19 +40,109 @@ describe('E2E: Health Check', () => {
   it('should return healthy status', async () => {
     const res = await app.request('/health', {}, env)
     expect(res.status).toBe(200)
-    const data = await res.json() as { status: string }
+    const data = await res.json() as HealthResponse
     expect(data.status).toBe('healthy')
   })
 
   it('should return readiness status', async () => {
     const res = await app.request('/readiness', {}, env)
     expect(res.status).toBe(200)
-    const data = await res.json() as { status: string; checks?: Record<string, boolean> }
+    const data = await res.json() as ReadinessResponse
     expect(data.status).toBe('ready')
   })
 })
 
-describe('E2E: WebSocket Route', () => {
+describe('E2E: Dashboard Overview', () => {
+  let env: Env
+  let authToken: string
+
+  beforeAll(async () => {
+    env = createTestEnv({ DEVELOPER_MODE: 'true' })
+
+    await app.request('/api/v1/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'dashboard@example.com',
+        password: 'Dashboard123!',
+        role: 'admin',
+      }),
+    }, env)
+
+    const loginRes = await app.request('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'dashboard@example.com',
+        password: 'Dashboard123!',
+      }),
+    }, env)
+
+    const loginData = await loginRes.json() as AuthLoginResponse
+    authToken = loginData.data?.access_token || ''
+  })
+
+  it('should include developer readiness summary in the overview', async () => {
+    const res = await app.request('/api/v1/dashboard', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(res.status).toBe(200)
+    const data = await res.json() as DashboardOverviewResponseData
+
+    expect(data.success).toBe(true)
+    expect(data.data.developer_readiness_summary.manifest_total).toBeGreaterThan(0)
+    expect(data.data.developer_readiness_summary.readiness_counts.diagnostic).toBeGreaterThan(0)
+    expect(data.data.developer_readiness_summary.execution_mode_counts.automated).toBeGreaterThan(0)
+    expect(data.data.developer_readiness_summary.ready_endpoints.length).toBeGreaterThan(0)
+    expect(data.data.developer_readiness_summary.manual_endpoints.length).toBeGreaterThan(0)
+    expect(data.data.developer_readiness_summary.fixture_coverage.total_endpoints).toBeGreaterThan(0)
+  })
+
+  it('should match the internal readiness summary contract', async () => {
+    const dashboardRes = await app.request('/api/v1/dashboard', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+    const internalRes = await app.request('/api/v1/internal/dev/readiness-summary', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(dashboardRes.status).toBe(200)
+    expect(internalRes.status).toBe(200)
+
+    const dashboardData = await dashboardRes.json() as DashboardOverviewResponseData
+    const internalData = await internalRes.json() as DeveloperReadinessSummaryResponseData
+
+    expect(dashboardData.data.developer_readiness_summary).toEqual(internalData.data.manifest)
+  })
+
+  it('should return the cached dashboard overview on the second request', async () => {
+    const firstRes = await app.request('/api/v1/dashboard', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+    const secondRes = await app.request('/api/v1/dashboard', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }, env)
+
+    expect(firstRes.status).toBe(200)
+    expect(secondRes.status).toBe(200)
+
+    const firstData = await firstRes.json() as DashboardOverviewResponseData
+    const secondData = await secondRes.json() as DashboardOverviewResponseData
+
+    expect(secondData.cached).toBe(true)
+    expect(secondData.data.developer_readiness_summary).toEqual(firstData.data.developer_readiness_summary)
+    expect(secondData.data.developer_readiness_summary.manifest_total).toBeGreaterThan(0)
+    expect(secondData.data.developer_readiness_summary.readiness_counts.verified).toBeGreaterThan(0)
+  })
+})
+
+describe('E2E: WebSocket Flow', () => {
   let env: Env
   let authToken: string
 
@@ -77,7 +168,7 @@ describe('E2E: WebSocket Route', () => {
       }),
     }, env)
 
-    const loginData = await loginRes.json() as { data?: { access_token: string } }
+    const loginData = await loginRes.json() as AuthLoginResponse
     authToken = loginData.data?.access_token || ''
   })
 
@@ -97,7 +188,7 @@ describe('E2E: WebSocket Route', () => {
     }, env)
 
     expect(res.status).toBe(426)
-    const data = await res.json() as { success: boolean; error: string }
+    const data = await res.json() as ApiErrorResponse
     expect(data.success).toBe(false)
     expect(data.error).toBe('Expected WebSocket upgrade')
   })
@@ -124,7 +215,7 @@ describe('E2E: Authentication Flow', () => {
     }, env)
 
     expect(res.status).toBe(201)
-    const data = await res.json() as { success: boolean; data?: { id: number; email: string } }
+    const data = await res.json() as AuthRegisterResponse
     expect(data.success).toBe(true)
     expect(data.data?.email).toBe('test@example.com')
   })
@@ -140,7 +231,7 @@ describe('E2E: Authentication Flow', () => {
     }, env)
 
     expect(res.status).toBe(200)
-    const data = await res.json() as { success: boolean; data?: { access_token: string; refresh_token: string } }
+    const data = await res.json() as AuthLoginResponse
     expect(data.success).toBe(true)
     expect(data.data?.access_token).toBeDefined()
     authToken = data.data?.access_token || ''
@@ -154,7 +245,7 @@ describe('E2E: Authentication Flow', () => {
     }, env)
 
     expect(res.status).toBe(200)
-    const data = await res.json() as { success: boolean; data?: { email: string } }
+    const data = await res.json() as AuthMeResponse
     expect(data.success).toBe(true)
     expect(data.data?.email).toBe('test@example.com')
   })
@@ -174,7 +265,7 @@ describe('E2E: Authentication Flow', () => {
     }, env)
 
     expect(res.status).toBe(200)
-    const data = await res.json() as { success: boolean; data?: { access_token: string } }
+    const data = await res.json() as AuthRefreshResponse
     expect(data.success).toBe(true)
     expect(data.data?.access_token).toBeDefined()
   })
@@ -208,7 +299,7 @@ describe('E2E: Node Management Flow', () => {
       }),
     }, env)
 
-    const loginData = await loginRes.json() as { data?: { access_token: string } }
+    const loginData = await loginRes.json() as AuthLoginResponse
     authToken = loginData.data?.access_token || ''
   })
 
@@ -272,7 +363,7 @@ describe('E2E: Playbook Flow', () => {
       }),
     }, env)
 
-    const loginData = await loginRes.json() as { data?: { access_token: string } }
+    const loginData = await loginRes.json() as AuthLoginResponse
     authToken = loginData.data?.access_token || ''
   })
 
@@ -341,7 +432,7 @@ describe('E2E: MFA Flow', () => {
       }),
     }, env)
 
-    const loginData = await loginRes.json() as { data?: { access_token: string } }
+    const loginData = await loginRes.json() as AuthLoginResponse
     authToken = loginData.data?.access_token || ''
   })
 
@@ -451,7 +542,7 @@ describe('E2E: AI and Vectorize Flow', () => {
       }),
     }, env)
 
-    const loginData = await loginRes.json() as { data?: { access_token: string } }
+    const loginData = await loginRes.json() as AuthLoginResponse
     authToken = loginData.data?.access_token || ''
   })
 
@@ -574,7 +665,7 @@ describe('E2E: Web3 and IPFS Flow', () => {
       }),
     }, env)
 
-    const loginData = await loginRes.json() as { data?: { access_token: string } }
+    const loginData = await loginRes.json() as AuthLoginResponse
     authToken = loginData.data?.access_token || ''
   })
 
@@ -709,7 +800,7 @@ describe('E2E: Incident Workflow', () => {
       }),
     }, env)
 
-    const loginData = await loginRes.json() as { data?: { access_token: string } }
+    const loginData = await loginRes.json() as AuthLoginResponse
     authToken = loginData.data?.access_token || ''
 
     const tokenRes = await app.request('/api/v1/users/me/tokens', {
@@ -1036,7 +1127,7 @@ describe('E2E: Incident Workflow', () => {
         password: 'IncidentOperator123!',
       }),
     }, env)
-    const operatorLoginData = await operatorLoginRes.json() as { data?: { access_token: string } }
+    const operatorLoginData = await operatorLoginRes.json() as AuthLoginResponse
     const operatorToken = operatorLoginData.data?.access_token || ''
 
     const createRes = await app.request('/api/v1/incidents', {
@@ -1072,7 +1163,7 @@ describe('E2E: Incident Workflow', () => {
         password: 'IncidentOperator123!',
       }),
     }, env)
-    const operatorLoginData = await operatorLoginRes.json() as { data?: { access_token: string } }
+    const operatorLoginData = await operatorLoginRes.json() as AuthLoginResponse
     const operatorToken = operatorLoginData.data?.access_token || ''
 
     const createRes = await app.request('/api/v1/incidents', {
@@ -1223,7 +1314,7 @@ describe('E2E: Realtime Endpoints Smoke', () => {
       }),
     }, env)
 
-    const loginData = await loginRes.json() as { data?: { access_token: string } }
+    const loginData = await loginRes.json() as AuthLoginResponse
     authToken = loginData.data?.access_token || ''
   })
 

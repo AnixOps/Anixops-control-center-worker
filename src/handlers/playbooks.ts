@@ -8,7 +8,7 @@ const uploadPlaybookSchema = z.object({
   content: z.string().min(1),
   description: z.string().optional(),
   category: z.enum(['security', 'infrastructure', 'proxy', 'maintenance', 'ssl', 'custom']).optional(),
-  variables: z.record(z.unknown()).optional(),
+  variables: z.record(z.string(), z.unknown()).optional(),
   tags: z.array(z.string()).optional(),
 })
 
@@ -572,7 +572,7 @@ export async function uploadPlaybookHandler(c: Context<{ Bindings: Env }>) {
     }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }

@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { ApiErrorResponse, ApiSuccessResponse } from '../types'
 
 const resilience = new Hono()
 
@@ -53,7 +54,7 @@ resilience.post('/circuit-breakers', async (c) => {
   const { name, failureThreshold = 5, successThreshold = 3, timeout = 60000 } = body
 
   if (!name) {
-    return c.json({ error: 'Name is required' }, 400)
+    return c.json({ success: false, error: 'Name is required' } as ApiErrorResponse, 400)
   }
 
   circuitBreakers.set(name, {
@@ -75,7 +76,7 @@ resilience.post('/circuit-breakers/:name/event', async (c) => {
 
   const breaker = circuitBreakers.get(name)
   if (!breaker) {
-    return c.json({ error: 'Circuit breaker not found' }, 404)
+    return c.json({ success: false, error: 'Circuit breaker not found' } as ApiErrorResponse, 404)
   }
 
   const now = Date.now()
@@ -120,7 +121,7 @@ resilience.post('/rate-limiters', async (c) => {
   const { name, maxTokens = 100, refillRate = 10, refillInterval = 1000 } = body
 
   if (!name) {
-    return c.json({ error: 'Name is required' }, 400)
+    return c.json({ success: false, error: 'Name is required' } as ApiErrorResponse, 400)
   }
 
   rateLimiters.set(name, {
@@ -138,7 +139,7 @@ resilience.post('/rate-limiters/:name/check', (c) => {
   const limiter = rateLimiters.get(name)
 
   if (!limiter) {
-    return c.json({ error: 'Rate limiter not found' }, 404)
+    return c.json({ success: false, error: 'Rate limiter not found' } as ApiErrorResponse, 404)
   }
 
   const now = Date.now()
@@ -172,7 +173,7 @@ resilience.post('/retries', async (c) => {
   const { name, maxRetries = 3, backoffMultiplier = 2, initialDelay = 100, maxDelay = 30000 } = body
 
   if (!name) {
-    return c.json({ error: 'Name is required' }, 400)
+    return c.json({ success: false, error: 'Name is required' } as ApiErrorResponse, 400)
   }
 
   retryConfigs.set(name, { maxRetries, backoffMultiplier, initialDelay, maxDelay })
@@ -187,7 +188,7 @@ resilience.post('/retries/:name/delay', (c) => {
 
   const config = retryConfigs.get(name)
   if (!config) {
-    return c.json({ error: 'Retry config not found' }, 404)
+    return c.json({ success: false, error: 'Retry config not found' } as ApiErrorResponse, 404)
   }
 
   const delay = Math.min(

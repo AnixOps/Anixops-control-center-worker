@@ -2,7 +2,7 @@ import type { Context } from 'hono'
 import { SignJWT, jwtVerify } from 'jose'
 import { hash, compare } from 'bcryptjs'
 import { z } from 'zod'
-import type { Env, User } from '../types'
+import type { ApiErrorResponse, AuthInvalidCredentialsResponse, AuthLockoutResponse, AuthLoginResponse, AuthLogoutResponse, AuthMeResponse, AuthPasswordValidationErrorResponse, AuthRefreshResponse, AuthRegisterResponse, AuthSchemaValidationErrorResponse, Env, User } from '../types'
 import { logAudit } from '../utils/audit'
 import { passwordSchema, validatePassword } from '../utils/password'
 import { checkLockout, recordFailedAttempt, clearFailedAttempts } from '../utils/lockout'
@@ -60,7 +60,7 @@ export async function loginHandler(c: Context<{ Bindings: Env }>) {
         retry_after: lockoutStatus.lockedUntil
           ? Math.ceil((new Date(lockoutStatus.lockedUntil).getTime() - Date.now()) / 1000)
           : undefined,
-      }, 423) // 423 Locked
+      } as AuthLockoutResponse, 423)
     }
 
     // 查找用户
@@ -85,7 +85,7 @@ export async function loginHandler(c: Context<{ Bindings: Env }>) {
         error: 'Invalid credentials',
         remaining_attempts: newStatus.remainingAttempts,
         account_locked: newStatus.locked,
-      }, 401)
+      } as AuthInvalidCredentialsResponse, 401)
     }
 
     // 验证密码
@@ -106,7 +106,7 @@ export async function loginHandler(c: Context<{ Bindings: Env }>) {
         error: 'Invalid credentials',
         remaining_attempts: newStatus.remainingAttempts,
         account_locked: newStatus.locked,
-      }, 401)
+      } as AuthInvalidCredentialsResponse, 401)
     }
 
     // 登录成功，清除失败尝试记录
@@ -150,10 +150,10 @@ export async function loginHandler(c: Context<{ Bindings: Env }>) {
           role: user.role,
         },
       },
-    })
+    } as AuthLoginResponse)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as AuthSchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -175,7 +175,7 @@ export async function registerHandler(c: Context<{ Bindings: Env }>) {
         error: 'Password does not meet complexity requirements',
         details: passwordValidation.errors,
         strength: passwordValidation.strength,
-      }, 400)
+      } as AuthPasswordValidationErrorResponse, 400)
     }
 
     // 检查用户是否已存在
@@ -185,7 +185,7 @@ export async function registerHandler(c: Context<{ Bindings: Env }>) {
       .first()
 
     if (existing) {
-      return c.json({ success: false, error: 'Email already registered' }, 409)
+      return c.json({ success: false, error: 'Email already registered' } as ApiErrorResponse, 409)
     }
 
     // 哈希密码
@@ -204,13 +204,10 @@ export async function registerHandler(c: Context<{ Bindings: Env }>) {
     // 记录审计日志
     await logAudit(c, result?.id, 'register', 'user', { email })
 
-    return c.json({
-      success: true,
-      data: result,
-    }, 201)
+    return c.json({ success: true, data: result } as AuthRegisterResponse, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues } as AuthSchemaValidationErrorResponse, 400)
     }
     throw err
   }
@@ -223,7 +220,7 @@ export async function refreshHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json<{ refresh_token?: string }>()
 
   if (!body.refresh_token) {
-    return c.json({ success: false, error: 'Missing refresh token' }, 400)
+    return c.json({ success: false, error: 'Missing refresh token' } as ApiErrorResponse, 400)
   }
 
   try {
@@ -237,7 +234,7 @@ export async function refreshHandler(c: Context<{ Bindings: Env }>) {
       .first<User>()
 
     if (!user) {
-      return c.json({ success: false, error: 'User not found' }, 404)
+      return c.json({ success: false, error: 'User not found' } as ApiErrorResponse, 404)
     }
 
     // 生成新的 access token
@@ -255,9 +252,9 @@ export async function refreshHandler(c: Context<{ Bindings: Env }>) {
         token_type: 'Bearer',
         expires_in: expire,
       },
-    })
+    } as AuthRefreshResponse)
   } catch {
-    return c.json({ success: false, error: 'Invalid refresh token' }, 401)
+    return c.json({ success: false, error: 'Invalid refresh token' } as ApiErrorResponse, 401)
   }
 }
 
@@ -269,7 +266,7 @@ export async function logoutHandler(c: Context<{ Bindings: Env }>) {
   const authHeader = c.req.header('Authorization')
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return c.json({ success: false, error: 'No token provided' }, 400)
+    return c.json({ success: false, error: 'No token provided' } as ApiErrorResponse, 400)
   }
 
   const token = authHeader.substring(7)
@@ -303,13 +300,13 @@ export async function logoutHandler(c: Context<{ Bindings: Env }>) {
     return c.json({
       success: true,
       message: 'Logged out successfully',
-    })
+    } as AuthLogoutResponse)
   } catch (err) {
     // Token 已过期或无效，仍然返回成功
     return c.json({
       success: true,
       message: 'Logged out successfully',
-    })
+    } as AuthLogoutResponse)
   }
 }
 
@@ -325,13 +322,13 @@ export async function meHandler(c: Context<{ Bindings: Env }>) {
     .first<User>()
 
   if (!userInfo) {
-    return c.json({ success: false, error: 'User not found' }, 404)
+    return c.json({ success: false, error: 'User not found' } as ApiErrorResponse, 404)
   }
 
   return c.json({
     success: true,
     data: userInfo,
-  })
+  } as AuthMeResponse)
 }
 
 /**

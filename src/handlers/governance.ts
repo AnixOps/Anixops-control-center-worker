@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import { z } from 'zod'
-import type { Env } from '../types'
+import type { ApiErrorResponse, Env } from '../types'
 import { logAudit } from '../utils/audit'
 import {
   createPolicy,
@@ -67,7 +67,7 @@ async function requirePolicy(c: Context<{ Bindings: Env }>, id: string) {
   const policy = await getPolicy(c.env, id)
 
   if (!policy) {
-    return c.json({ success: false, error: 'Policy not found' }, 404)
+    return c.json({ success: false, error: 'Policy not found' } as ApiErrorResponse, 404)
   }
 
   return policy
@@ -125,7 +125,7 @@ export async function createPolicyHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: policy }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -136,7 +136,7 @@ export async function updatePolicyHandler(c: Context<{ Bindings: Env }>) {
   const policyId = c.req.param('id') as string
 
   if (policyId === 'default-approval-policy') {
-    return c.json({ success: false, error: 'Cannot modify default policy' }, 403)
+    return c.json({ success: false, error: 'Cannot modify default policy' } as ApiErrorResponse, 403)
   }
 
   const existing = await requirePolicy(c, policyId)
@@ -149,7 +149,7 @@ export async function updatePolicyHandler(c: Context<{ Bindings: Env }>) {
     const updated = await updatePolicy(c.env, policyId, body as UpdatePolicyInput)
 
     if (!updated) {
-      return c.json({ success: false, error: 'Failed to update policy' }, 400)
+      return c.json({ success: false, error: 'Failed to update policy' } as ApiErrorResponse, 400)
     }
 
     await logAudit(c, principal.sub, 'update_governance_policy', 'governance_policy', {
@@ -161,7 +161,7 @@ export async function updatePolicyHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: updated })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -172,7 +172,7 @@ export async function deletePolicyHandler(c: Context<{ Bindings: Env }>) {
   const policyId = c.req.param('id') as string
 
   if (policyId === 'default-approval-policy') {
-    return c.json({ success: false, error: 'Cannot delete default policy' }, 403)
+    return c.json({ success: false, error: 'Cannot delete default policy' } as ApiErrorResponse, 403)
   }
 
   const existing = await requirePolicy(c, policyId)
@@ -183,7 +183,7 @@ export async function deletePolicyHandler(c: Context<{ Bindings: Env }>) {
   const deleted = await deletePolicy(c.env, policyId)
 
   if (!deleted) {
-    return c.json({ success: false, error: 'Failed to delete policy' }, 400)
+    return c.json({ success: false, error: 'Failed to delete policy' } as ApiErrorResponse, 400)
   }
 
   await logAudit(c, principal.sub, 'delete_governance_policy', 'governance_policy', {

@@ -32,7 +32,7 @@ const createWebhookSchema = z.object({
   url: z.string().url(),
   secret: z.string().max(100).optional(),
   events: z.array(webhookEventSchema).min(1),
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
 })
 
 const updateWebhookSchema = z.object({
@@ -41,7 +41,7 @@ const updateWebhookSchema = z.object({
   secret: z.string().max(100).optional(),
   events: z.array(webhookEventSchema).min(1).optional(),
   enabled: z.boolean().optional(),
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
 })
 
 async function requireWebhook(c: Context<{ Bindings: Env }>, id: string) {
@@ -99,7 +99,7 @@ export async function createWebhookHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: webhook }, 201)
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }
@@ -130,7 +130,7 @@ export async function updateWebhookHandler(c: Context<{ Bindings: Env }>) {
     return c.json({ success: true, data: updated })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation error', details: err.errors }, 400)
+      return c.json({ success: false, error: 'Validation error', details: err.issues }, 400)
     }
     throw err
   }

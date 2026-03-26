@@ -4,7 +4,7 @@
  */
 
 import type { Context } from 'hono'
-import type { Env } from '../types'
+import type { ApiErrorResponse, ApiSuccessResponse, Env } from '../types'
 
 // 支持的模型
 export const AI_MODELS = {
@@ -28,11 +28,7 @@ export const AI_MODELS = {
   summarization: '@cf/facebook/bart-large-cnn',
 }
 
-interface AIResponse {
-  success: boolean
-  data?: unknown
-  error?: string
-}
+type AIResponse = ApiSuccessResponse<unknown> | ApiErrorResponse
 
 /**
  * 文本生成 (LLM 推理)
@@ -67,6 +63,7 @@ export async function generateText(
     return { success: false, error: String(error) }
   }
 }
+
 
 /**
  * 生成文本嵌入向量 (用于语义搜索)
@@ -203,16 +200,16 @@ export async function aiChatHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json<{ message: string; history?: Array<{ role: string; content: string }> }>()
 
   if (!body.message) {
-    return c.json({ success: false, error: 'Message is required' }, 400)
+    return c.json({ success: false, error: 'Message is required' } as ApiErrorResponse, 400)
   }
 
   const result = await chatAssistant(c.env, body.message, body.history || [])
 
   if (result.success) {
-    return c.json({ success: true, data: result.data })
+    return c.json({ success: true, data: result.data } as ApiSuccessResponse<unknown>)
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }
 
 /**
@@ -222,16 +219,16 @@ export async function aiAnalyzeLogHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json<{ log: string }>()
 
   if (!body.log) {
-    return c.json({ success: false, error: 'Log content is required' }, 400)
+    return c.json({ success: false, error: 'Log content is required' } as ApiErrorResponse, 400)
   }
 
   const result = await analyzeLog(c.env, body.log)
 
   if (result.success) {
-    return c.json({ success: true, data: result.data })
+    return c.json({ success: true, data: result.data } as ApiSuccessResponse<unknown>)
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }
 
 /**
@@ -248,10 +245,10 @@ export async function aiOpsAdviceHandler(c: Context<{ Bindings: Env }>) {
   const result = await generateOpsAdvice(c.env, body)
 
   if (result.success) {
-    return c.json({ success: true, data: result.data })
+    return c.json({ success: true, data: result.data } as ApiSuccessResponse<unknown>)
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }
 
 /**
@@ -261,16 +258,16 @@ export async function aiEmbeddingHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json<{ text: string }>()
 
   if (!body.text) {
-    return c.json({ success: false, error: 'Text is required' }, 400)
+    return c.json({ success: false, error: 'Text is required' } as ApiErrorResponse, 400)
   }
 
   const result = await generateEmbedding(c.env, body.text)
 
   if (result.success) {
-    return c.json({ success: true, data: result.data })
+    return c.json({ success: true, data: result.data } as ApiSuccessResponse<unknown>)
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }
 
 /**
@@ -280,7 +277,7 @@ export async function aiQueryHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json<{ query: string; schema?: string }>()
 
   if (!body.query) {
-    return c.json({ success: false, error: 'Query is required' }, 400)
+    return c.json({ success: false, error: 'Query is required' } as ApiErrorResponse, 400)
   }
 
   const schema = body.schema || 'nodes, tasks, schedules, playbooks, logs'
@@ -288,8 +285,8 @@ export async function aiQueryHandler(c: Context<{ Bindings: Env }>) {
   const result = await naturalLanguageToQuery(c.env, body.query, schema)
 
   if (result.success) {
-    return c.json({ success: true, data: result.data })
+    return c.json({ success: true, data: result.data } as ApiSuccessResponse<unknown>)
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }

@@ -4,7 +4,7 @@
  */
 
 import type { Context } from 'hono'
-import type { Env } from '../types'
+import type { ApiErrorResponse, ApiMessageResponse, ApiSuccessResponse, Env } from '../types'
 
 // 索引名称
 const INDEX_NAME = 'anixops-vectors'
@@ -272,7 +272,7 @@ export async function vectorSearchHandler(c: Context<{ Bindings: Env }>) {
   }>()
 
   if (!body.embedding || !Array.isArray(body.embedding)) {
-    return c.json({ success: false, error: 'Embedding is required' }, 400)
+    return c.json({ success: false, error: 'Embedding is required' } as ApiErrorResponse, 400)
   }
 
   const filter = body.type ? { type: body.type, ...body.filter } : body.filter
@@ -283,10 +283,10 @@ export async function vectorSearchHandler(c: Context<{ Bindings: Env }>) {
   })
 
   if (result.success) {
-    return c.json({ success: true, data: result.data })
+    return c.json({ success: true, data: result.data } as ApiSuccessResponse<unknown>)
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }
 
 /**
@@ -302,7 +302,7 @@ export async function vectorInsertHandler(c: Context<{ Bindings: Env }>) {
   }>()
 
   if (!body.vectors || !Array.isArray(body.vectors)) {
-    return c.json({ success: false, error: 'Vectors are required' }, 400)
+    return c.json({ success: false, error: 'Vectors are required' } as ApiErrorResponse, 400)
   }
 
   const vectors = body.vectors.map((v) => ({
@@ -314,10 +314,10 @@ export async function vectorInsertHandler(c: Context<{ Bindings: Env }>) {
   const result = await insertVectors(c.env, vectors)
 
   if (result.success) {
-    return c.json({ success: true, message: `Inserted ${vectors.length} vectors` })
+    return c.json({ success: true, message: `Inserted ${vectors.length} vectors` } as ApiMessageResponse)
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }
 
 /**
@@ -327,14 +327,14 @@ export async function vectorDeleteHandler(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json<{ id: string }>()
 
   if (!body.id) {
-    return c.json({ success: false, error: 'ID is required' }, 400)
+    return c.json({ success: false, error: 'ID is required' } as ApiErrorResponse, 400)
   }
 
   const result = await deleteVector(c.env, body.id)
 
   if (result.success) {
-    return c.json({ success: true, message: 'Vector deleted' })
+    return c.json({ success: true, message: 'Vector deleted' } as ApiMessageResponse)
   }
 
-  return c.json({ success: false, error: result.error }, 500)
+  return c.json({ success: false, error: result.error } as ApiErrorResponse, 500)
 }
