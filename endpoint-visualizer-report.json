@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-25T22:53:10.273Z",
+  "generated_at": "2026-03-26T22:54:12.514Z",
   "summary": {
     "total": 264,
     "passed": 264,
@@ -28,7 +28,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "status=healthy"
     },
     {
@@ -79,7 +79,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "OK"
     },
     {
@@ -116,7 +116,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 1,
+      "ms": 2,
       "summary": "{\"success\":true,\"data\":{\"developer_mode\":true,\"environment\":\"development\",\"version\":\"1.0.0\",\"build_sha\":\"unknown\",\"reque"
     },
     {
@@ -135,7 +135,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 2,
       "summary": "{\"success\":true,\"data\":{\"runtime\":{\"environment\":\"development\",\"developer_mode\":true,\"version\":\"1.0.0\",\"build_sha\":\"unkn"
     },
     {
@@ -191,7 +191,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 243,
+      "ms": 261,
       "summary": "{\"success\":true,\"data\":{\"access_token\":\"[redacted]\",\"refresh_token\":\"[redacted]\",\"token_type\":\"Bearer\",\"expires_in\":3600"
     },
     {
@@ -248,7 +248,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":{\"id\":3,\"email\":\"visualizer-viewer@example.com\",\"password_hash\":\"[redacted]\",\"role\":\"viewer\",\"ena"
     },
     {
@@ -287,7 +287,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[]}"
     },
     {
@@ -346,7 +346,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":{\"sessions\":[],\"current_session_id\":\"current\"}}"
     },
     {
@@ -561,7 +561,7 @@
       "expected": "201",
       "status": 201,
       "pass": true,
-      "ms": 1,
+      "ms": 2,
       "summary": "{\"success\":true,\"data\":{\"id\":4,\"name\":\"visualizer-node-1\",\"host\":\"192.168.1.100\",\"port\":22,\"status\":\"offline\",\"config\":n"
     },
     {
@@ -826,7 +826,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[]}"
     },
     {
@@ -844,7 +844,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"install-fail2ban\",\"display_name\":\"Install Fail2ban\",\"description\":\"Install and configur"
     },
     {
@@ -862,7 +862,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"id\":\"security\",\"name\":\"Security\",\"icon\":\"shield\",\"description\":\"Security hardening and protect"
     },
     {
@@ -1069,7 +1069,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[]}"
     },
     {
@@ -1201,7 +1201,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"id\":4,\"name\":\"visualizer-node-1\",\"host\":\"192.168.1.100\",\"port\":22,\"status\":\"offline\",\"config\":"
     },
     {
@@ -1333,7 +1333,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"ansible\",\"version\":\"1.0.0\",\"status\":\"running\",\"capabilities\":[\"run\",\"validate\",\"invento"
     },
     {
@@ -1407,7 +1407,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":{\"range\":\"24h\",\"active_users\":0,\"action_distribution\":[],\"node_operations\":[]}}"
     },
     {
@@ -1461,7 +1461,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":{\"unread_count\":1}}"
     },
     {
@@ -1574,7 +1574,7 @@
       "status": 201,
       "pass": true,
       "ms": 2,
-      "summary": "{\"success\":true,\"data\":{\"id\":\"82633d58-c21f-486e-9806-7d10de5939de\",\"title\":\"Visualizer Incident\",\"status\":\"open\",\"sever"
+      "summary": "{\"success\":true,\"data\":{\"id\":\"33cf28e9-e9b4-478d-9f1d-6eac61063eaf\",\"title\":\"Visualizer Incident\",\"status\":\"open\",\"sever"
     },
     {
       "id": "GET /api/v1/incidents/statistics",
@@ -1609,8 +1609,8 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 1,
-      "summary": "{\"success\":true,\"data\":{\"items\":[{\"id\":\"82633d58-c21f-486e-9806-7d10de5939de\",\"title\":\"Visualizer Incident\",\"summary\":nu"
+      "ms": 2,
+      "summary": "{\"success\":true,\"data\":{\"items\":[{\"id\":\"33cf28e9-e9b4-478d-9f1d-6eac61063eaf\",\"title\":\"Visualizer Incident\",\"summary\":nu"
     },
     {
       "id": "GET /api/v1/incidents/templates",
@@ -2916,7 +2916,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":{\"id\":\"default-approval-policy\",\"name\":\"Default Incident Approval Policy\",\"description\":\"Default "
     },
     {
@@ -3010,7 +3010,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[]}"
     },
     {
@@ -3028,7 +3028,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[]}"
     },
     {
@@ -3160,7 +3160,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":{\"backups\":[],\"latest\":null,\"total\":0}}"
     },
     {
@@ -3178,7 +3178,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":{\"latest\":null,\"statistics\":{\"total_backups\":0,\"total_size_bytes\":0,\"total_size_mb\":0}}}"
     },
     {
@@ -3435,7 +3435,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":{\"enabled\":false,\"verified\":false,\"recovery_codes_remaining\":0}}"
     },
     {
@@ -3604,8 +3604,8 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
-      "summary": "{\"success\":true,\"data\":[{\"name\":\"default\",\"status\":\"Active\",\"createdAt\":\"2026-03-25T22:53:10.235Z\",\"labels\":{}},{\"name\":"
+      "ms": 1,
+      "summary": "{\"success\":true,\"data\":[{\"name\":\"default\",\"status\":\"Active\",\"createdAt\":\"2026-03-26T22:54:12.473Z\",\"labels\":{}},{\"name\":"
     },
     {
       "id": "GET /api/v1/kubernetes/namespaces/:namespace",
@@ -3641,7 +3641,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"node-1\",\"status\":\"Ready\",\"roles\":[\"control-plane\",\"master\"],\"kubeletVersion\":\"v1.28.0\","
     },
     {
@@ -3659,7 +3659,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"anixops-api-xxx\",\"namespace\":\"default\",\"status\":\"Running\",\"podIP\":\"10.0.0.1\",\"nodeName\""
     },
     {
@@ -3677,7 +3677,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"anixops-api\",\"namespace\":\"default\",\"replicas\":2,\"readyReplicas\":2,\"availableReplicas\":2"
     },
     {
@@ -3695,7 +3695,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"anixops-api\",\"namespace\":\"default\",\"type\":\"ClusterIP\",\"clusterIP\":\"10.96.0.1\",\"external"
     },
     {
@@ -3713,7 +3713,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"pod-started\",\"namespace\":\"default\",\"type\":\"Normal\",\"reason\":\"Started\",\"message\":\"Starte"
     },
     {
@@ -3806,7 +3806,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"anixops-api\",\"namespace\":\"default\",\"version\":\"v1\",\"protocol\":\"HTTP\",\"health\":\"Healthy\"}"
     },
     {
@@ -3824,7 +3824,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"anixops-api\",\"namespace\":\"default\",\"hosts\":[\"anixops-api\"],\"routes\":[{\"route\":[{\"destin"
     },
     {
@@ -3842,7 +3842,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"anixops-api\",\"namespace\":\"default\",\"host\":\"anixops-api\",\"subsets\":[{\"name\":\"v1\",\"labels"
     },
     {
@@ -3860,7 +3860,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"anixops-gateway\",\"namespace\":\"default\",\"selectors\":{\"istio\":\"ingressgateway\"},\"servers\""
     },
     {
@@ -3954,7 +3954,7 @@
       "status": 200,
       "pass": true,
       "ms": 1,
-      "summary": "{\"success\":true,\"data\":{\"totalLogs\":21,\"logsByLevel\":{},\"logsByService\":{},\"storageUsed\":4591}}"
+      "summary": "{\"success\":true,\"data\":{\"totalLogs\":21,\"logsByLevel\":{},\"logsByService\":{},\"storageUsed\":8776}}"
     },
     {
       "id": "GET /api/v1/logs/export",
@@ -4388,7 +4388,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":[3,4,{\"nodes\":{\"total\":0,\"online\":0,\"offline\":0,\"maintenance\":0},\"users\":{\"total\":0},\"activity\":{"
     },
     {
@@ -4653,7 +4653,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 0,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":{\"connections\":[],\"total\":0,\"stats\":{\"total_connections\":0,\"sse_connections\":0,\"websocket_connect"
     },
     {
