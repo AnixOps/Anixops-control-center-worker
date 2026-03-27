@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-26T22:54:12.514Z",
+  "generated_at": "2026-03-27T00:03:02.103Z",
   "summary": {
     "total": 264,
     "passed": 264,
@@ -135,7 +135,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 2,
+      "ms": 1,
       "summary": "{\"success\":true,\"data\":{\"runtime\":{\"environment\":\"development\",\"developer_mode\":true,\"version\":\"1.0.0\",\"build_sha\":\"unkn"
     },
     {
@@ -191,7 +191,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 261,
+      "ms": 302,
       "summary": "{\"success\":true,\"data\":{\"access_token\":\"[redacted]\",\"refresh_token\":\"[redacted]\",\"token_type\":\"Bearer\",\"expires_in\":3600"
     },
     {
@@ -1389,7 +1389,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 1,
+      "ms": 2,
       "summary": "{\"success\":true,\"data\":{\"nodes\":{\"total\":0,\"online\":0,\"offline\":0,\"maintenance\":0},\"users\":{\"total\":0},\"activity\":{\"last"
     },
     {
@@ -1555,7 +1555,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 1,
+      "ms": 2,
       "summary": "{\"success\":true,\"data\":{\"items\":[],\"total\":0,\"page\":1,\"per_page\":20,\"total_pages\":1}}"
     },
     {
@@ -1573,8 +1573,8 @@
       "expected": "201",
       "status": 201,
       "pass": true,
-      "ms": 2,
-      "summary": "{\"success\":true,\"data\":{\"id\":\"33cf28e9-e9b4-478d-9f1d-6eac61063eaf\",\"title\":\"Visualizer Incident\",\"status\":\"open\",\"sever"
+      "ms": 3,
+      "summary": "{\"success\":true,\"data\":{\"id\":\"33456c4e-20ec-4781-80f5-3772094c8d90\",\"title\":\"Visualizer Incident\",\"status\":\"open\",\"sever"
     },
     {
       "id": "GET /api/v1/incidents/statistics",
@@ -1610,7 +1610,7 @@
       "status": 200,
       "pass": true,
       "ms": 2,
-      "summary": "{\"success\":true,\"data\":{\"items\":[{\"id\":\"33cf28e9-e9b4-478d-9f1d-6eac61063eaf\",\"title\":\"Visualizer Incident\",\"summary\":nu"
+      "summary": "{\"success\":true,\"data\":{\"items\":[{\"id\":\"33456c4e-20ec-4781-80f5-3772094c8d90\",\"title\":\"Visualizer Incident\",\"summary\":nu"
     },
     {
       "id": "GET /api/v1/incidents/templates",
@@ -1646,7 +1646,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 1,
+      "ms": 2,
       "summary": "{\"success\":true,\"data\":{\"current\":{\"open_incidents\":1,\"critical_incidents\":0,\"unassigned_incidents\":1,\"sla_breach_count\""
     },
     {
@@ -3605,7 +3605,7 @@
       "status": 200,
       "pass": true,
       "ms": 1,
-      "summary": "{\"success\":true,\"data\":[{\"name\":\"default\",\"status\":\"Active\",\"createdAt\":\"2026-03-26T22:54:12.473Z\",\"labels\":{}},{\"name\":"
+      "summary": "{\"success\":true,\"data\":[{\"name\":\"default\",\"status\":\"Active\",\"createdAt\":\"2026-03-27T00:03:02.046Z\",\"labels\":{}},{\"name\":"
     },
     {
       "id": "GET /api/v1/kubernetes/namespaces/:namespace",
@@ -3860,7 +3860,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 1,
+      "ms": 3,
       "summary": "{\"success\":true,\"data\":[{\"name\":\"anixops-gateway\",\"namespace\":\"default\",\"selectors\":{\"istio\":\"ingressgateway\"},\"servers\""
     },
     {
@@ -3935,7 +3935,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 10,
+      "ms": 16,
       "summary": "{\"success\":true,\"data\":[{\"nodes\":{\"total\":0,\"online\":0,\"offline\":0,\"maintenance\":0},\"users\":{\"total\":0},\"activity\":{\"las"
     },
     {
@@ -3953,7 +3953,7 @@
       "expected": "200",
       "status": 200,
       "pass": true,
-      "ms": 1,
+      "ms": 2,
       "summary": "{\"success\":true,\"data\":{\"totalLogs\":21,\"logsByLevel\":{},\"logsByService\":{},\"storageUsed\":8776}}"
     },
     {

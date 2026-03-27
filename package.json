@@ -8,6 +8,7 @@
     "build:watch": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=dist/index.mjs --watch",
     "dev": "npm run build && wrangler dev --no-bundle",
     "deploy": "npm run build && wrangler deploy --no-bundle",
+    "deploy:tail": "wrangler deploy --config wrangler.tail.toml",
     "tail": "wrangler tail",
     "test": "vitest run",
     "test:watch": "vitest",

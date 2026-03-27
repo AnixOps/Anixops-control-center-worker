@@ -2,10 +2,11 @@ import type { Hono } from 'hono'
 import type { Env } from '../types'
 import { registerAuthRoutes } from './register-auth'
 import { registerPlatformRoutes } from './register-platform'
+import { registerProtectedRoutes } from './register-protected'
 
 export function createApp(app: Hono<{ Bindings: Env }>) {
-  // Compose shared platform and auth routes in one place.
   registerPlatformRoutes(app)
   registerAuthRoutes(app)
+  registerProtectedRoutes(app)
   return app
 }

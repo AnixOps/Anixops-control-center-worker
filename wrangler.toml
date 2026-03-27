@@ -1,4 +1,4 @@
-name = "anixops-control-center-workers"
+name = "anixops-control-center-workers-sandbox-app"
 main = "dist/index.mjs"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
@@ -13,6 +13,9 @@ BUILD_SHA = "dev"
 [[routes]]
 pattern = "api.anixops.com"
 custom_domain = true
+
+[[tail_consumers]]
+service = "anixops-control-center-workers-tail"
 
 [[d1_databases]]
 binding = "DB"
